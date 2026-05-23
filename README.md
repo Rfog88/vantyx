@@ -5,13 +5,13 @@ AI-orchestrated web-transformation agency for local home-services businesses (el
 ## Import on the droplet
 
 ```bash
-npx companies.sh add github.com/Rfog88/vantyx
+npx companies.sh add https://github.com/Rfog88/vantyx/tree/master
 ```
 
 For updates after the first add:
 
 ```bash
-npx companies.sh add github.com/Rfog88/vantyx --update
+npx companies.sh add https://github.com/Rfog88/vantyx/tree/master --update
 ```
 
 ## Repo layout

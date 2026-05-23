@@ -51,7 +51,7 @@ The agency-level brand identity (voice, palette, taglines, founder story) lives 
 This repo is the authoring surface. Import on the droplet via:
 
 ```bash
-npx companies.sh add github.com/Rfog88/vantyx
+npx companies.sh add https://github.com/Rfog88/vantyx/tree/master
 ```
 
 Full deployment, secrets-provisioning, and verification sequence: see `~/.claude/plans/crystalline-seeking-key.md` (Sections 1, 11, 12, 13).
