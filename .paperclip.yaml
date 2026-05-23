@@ -1,0 +1,146 @@
+# Paperclip company config: routines, project env defaults, plugin registrations.
+# Routines materialize into Issues — every cron run produces an auditable Issue
+# (WEB-N codes in your existing company; VTX-N or similar once imported).
+#
+# Agent references use slug; Paperclip resolves to UUID at import.
+# Cron uses 5-field syntax in the specified timezone.
+
+routines:
+
+  # ---------------------------------------------------------------
+  # Sdr morning scrape — weekdays 8am ET
+  # Sami runs gmaps-scrape + lead-score on today's queued territories.
+  # CMO maintains the queue in shared/territories.md (markdown table; sdr reads top 3).
+  # ---------------------------------------------------------------
+  sdr-morning:
+    triggers:
+      - kind: schedule
+        cronExpression: "0 13 * * 1-5"        # 13:00 UTC = 08:00 America/New_York
+        timezone: America/New_York
+    assigneeAgentSlug: sdr
+    concurrencyPolicy: skip                   # if previous run still active, skip this tick
+    catchUpPolicy: skip-missed                # don't replay missed weekends
+    title: "Morning territory scrape"
+    prompt: |
+      Read `shared/territories.md`. Take the top 3 unscraped (zip, radius, niche) rows.
+
+      For each row:
+        1. Run `gmaps-scrape` with the inputs.
+        2. Run `lead-score` to apply the rubric and probe websites.
+
+      When done, post a single summary comment on this Issue:
+        "Scraped N. ≥65: M. Top niche: X. Top metro: Y. SerpAPI spend: $Z."
+
+      If you hit `external-quota-exceeded`, run `escalate-to-board` Tier 1 with
+      the reset window and stop — do NOT continue to the next row.
+
+  # ---------------------------------------------------------------
+  # Budget rollup — every 6 hours
+  # Cipher checks notional budget burn per agent + nudges Discord.
+  # ---------------------------------------------------------------
+  budget-rollup:
+    triggers:
+      - kind: schedule
+        cronExpression: "0 */6 * * *"         # every 6 hours UTC
+        timezone: America/New_York
+    assigneeAgentSlug: cto
+    concurrencyPolicy: skip
+    title: "Budget rollup (6h)"
+    prompt: |
+      For each agent in Vantyx, compute `spent_monthly_cents / budget_monthly_cents`.
+
+      Categorize:
+        - >0.80 AND <1.00 → Discord nudge to #vantyx-ops via `board-notify` Tier 0.
+        - ≥1.00          → pause the agent (set permissions.paused=true) AND run
+                            `escalate-to-board` Tier 2 with reason
+                            `subscription-rate-limit` (notional budget exceeded
+                            implies real quota burn that needs Board attention).
+
+      Comment a one-line summary on this Issue:
+        "Burn: <agent>: <pct%>; <agent>: <pct%>; ..."
+
+  # ---------------------------------------------------------------
+  # Morning KPI rollup — weekdays 7:55am ET (just before sdr morning)
+  # Aria's HEARTBEAT step 4 reads this; this routine produces it.
+  # ---------------------------------------------------------------
+  kpi-rollup-morning:
+    triggers:
+      - kind: schedule
+        cronExpression: "55 12 * * 1-5"       # 12:55 UTC = 07:55 America/New_York
+        timezone: America/New_York
+    assigneeAgentSlug: ceo
+    concurrencyPolicy: skip
+    title: "Morning KPI rollup"
+    prompt: |
+      Run the `kpi-rollup` skill with `{window: "daily"}`.
+
+      The skill itself decides whether to post to Discord (only if a metric has
+      changed by >15% vs 7-day average). It returns either:
+        `{posted: true, deltas: [...]}` or
+        `{posted: false, reason: "no_meaningful_delta", deltas: [...]}`.
+
+      In either case, comment the deltas array on this Issue so the Board has an
+      audit trail of yesterday's metrics — but do NOT add a Discord ping yourself;
+      the skill already did that work if warranted.
+
+  # ---------------------------------------------------------------
+  # Panic pause — MANUAL trigger only, no schedule.
+  # Pauses every non-CEO agent in one shot. Use when something is on fire
+  # and you need to stop all spend immediately.
+  #
+  # Trigger from droplet:
+  #   curl -X POST $PAPERCLIP_API_URL/routines/panic-pause-all/run \
+  #     -H "Authorization: Bearer $PAPERCLIP_API_TOKEN"
+  # ---------------------------------------------------------------
+  panic-pause-all:
+    triggers: []                              # no schedule; manual only
+    assigneeAgentSlug: cto
+    concurrencyPolicy: queue
+    title: "Panic pause — stop all non-CEO agents"
+    prompt: |
+      Set `permissions.paused = true` on every agent in Vantyx EXCEPT `ceo`.
+
+      Then run `escalate-to-board` Tier 2 with:
+        - reason: `human-review-required`
+        - title: "PANIC PAUSE engaged — all reports halted"
+        - context: "Manual panic-pause triggered by `{trigger_actor}`. All non-CEO
+                    agents are paused. Investigate root cause; manually resume each
+                    agent when safe."
+
+      Do NOT auto-resume — the Board (Ryan) manually un-pauses each agent in the
+      Paperclip UI after diagnosis.
+
+  # ---------------------------------------------------------------
+  # Phase 1.5 — demo-build-watcher — added in Commit 8.
+  # Commented out until demo-gen agent exists.
+  # ---------------------------------------------------------------
+  # demo-build-watcher:
+  #   triggers:
+  #     - kind: schedule
+  #       cronExpression: "*/15 * * * *"
+  #       timezone: America/New_York
+  #   assigneeAgentSlug: demo-gen
+  #   concurrencyPolicy: queue
+  #   title: "Demo-build watcher (15-min)"
+  #   prompt: |
+  #     Query: SELECT * FROM leads WHERE stage='new' AND score>=65 LIMIT 3.
+  #     For each: brand-extract → template-clone → template-fill → vercel-deploy
+  #             → lead-update → notify-cmo-sdr.
+
+# ---------------------------------------------------------------
+# Project Env defaults (overrides agent env on matching keys).
+# Bind real secrets after provisioning in Paperclip UI per plan Section 12.
+# Currently commented; uncomment as secrets are created.
+# ---------------------------------------------------------------
+projectEnv:
+  # Shared across every agent:
+  # DISCORD_WEBHOOK_URL: { type: secret, source: DISCORD_WEBHOOK_URL }
+  # BOARD_DND_HOURS:     { type: literal, value: "22-07" }
+  # PAPERCLIP_API_URL:   { type: literal, value: "http://localhost:3100" }
+  # PAPERCLIP_API_TOKEN: { type: secret, source: PAPERCLIP_API_TOKEN }
+
+  # Tier-2 SMS (optional):
+  # TWILIO_AUTH_TOKEN:   { type: secret, source: TWILIO_AUTH_TOKEN }
+  # TWILIO_ACCOUNT_SID:  { type: secret, source: TWILIO_ACCOUNT_SID }
+  # TWILIO_FROM_NUMBER:  { type: secret, source: TWILIO_FROM_NUMBER }
+  # BOARD_PHONE:         { type: secret, source: BOARD_PHONE }

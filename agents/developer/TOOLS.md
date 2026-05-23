@@ -1,0 +1,10 @@
+paperclip
+paperclip-dev
+paperclip-converting-plans-to-tasks
+para-memory-files
+terminal-bench-loop
+diagnose-why-work-stopped
+escalate-to-board
+board-notify
+load-brand
+brand-consistency-check

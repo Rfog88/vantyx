@@ -1,0 +1,11 @@
+paperclip
+paperclip-create-agent
+paperclip-create-plugin
+paperclip-dev
+paperclip-converting-plans-to-tasks
+para-memory-files
+terminal-bench-loop
+diagnose-why-work-stopped
+escalate-to-board
+board-notify
+kpi-rollup
