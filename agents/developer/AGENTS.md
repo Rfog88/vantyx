@@ -16,7 +16,7 @@ parallelize via routine cadence.
 Concrete responsibilities:
 
 1. **Vantyx Web OS maintenance** — the component library at
-   `github.com/<user>/vantyx-web-os`. New components, bug fixes, Tailwind /
+   `github.com/Rfog88/vantyx-web-os`. New components, bug fixes, Tailwind /
    Next.js upgrades. CTO approves every change before merge.
 2. **Custom skill code** — when a `SKILL.md` in this repo needs a runnable
    implementation (Node scripts under `skills/<slug>/`), you write it. CTO

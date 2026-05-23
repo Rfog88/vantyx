@@ -12,7 +12,7 @@ On each heartbeat:
 3. **If it's a code change Issue:**
    - Read `shared/brand/vantyx.md` (and the per-client file if applicable).
    - Read the existing component / skill code under
-     `github.com/<user>/vantyx-web-os` (clone read-only).
+     `github.com/Rfog88/vantyx-web-os` (clone read-only).
    - Implement the smallest change that solves the Issue. Do not refactor
      surrounding code unless explicitly asked.
    - Run the build locally: `pnpm build` (or `npm run build`).
