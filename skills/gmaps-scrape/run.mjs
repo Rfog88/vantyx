@@ -87,11 +87,17 @@ async function main() {
     process.exit(3);
   }
 
+  // SerpAPI google_maps engine wants either `ll=@lat,lng,zoom_level` (true GPS)
+  // OR `location=<place>` (string). Zip codes work as `location`. Pair with `z`
+  // (zoom level) where ~50mi maps to z=10. See Sami's patch notes on VAN-1.
   const query = NICHE_QUERIES[niche];
+  const r = parseInt(radius, 10);
+  const zoom = r <= 5 ? 14 : r <= 15 ? 12 : r <= 30 ? 11 : r <= 60 ? 10 : 9;
   const url = new URL("https://serpapi.com/search.json");
   url.searchParams.set("engine", "google_maps");
   url.searchParams.set("q", query);
-  url.searchParams.set("ll", `@${zip},${radius}z`);
+  url.searchParams.set("location", zip);
+  url.searchParams.set("z", String(zoom));
   url.searchParams.set("type", "search");
   url.searchParams.set("api_key", apiKey);
 
@@ -134,8 +140,16 @@ async function main() {
     const dup = dupCheck.get(phone, phone, website, website);
     if (dup) { duplicates++; continue; }
 
-    const city = p.address?.split(",").slice(-3, -2)[0]?.trim() || null;
-    const state = p.address?.match(/\b([A-Z]{2})\b/)?.[1] || null;
+    // SerpAPI address formats vary: "1234 Main St, Lima, OH 45801",
+    // "Lima, OH 45801", or sometimes without ZIP. City is the segment
+    // immediately before "STATE ZIP". (Sami flagged the old slice(-3,-2)
+    // logic as misaligned on VAN-1.)
+    const addr = p.address || "";
+    const parts = addr.split(",").map(s => s.trim()).filter(Boolean);
+    const lastPart = parts[parts.length - 1] || "";
+    const stateZipMatch = lastPart.match(/^([A-Z]{2})(?:\s+\d{5})?$/);
+    const state = stateZipMatch ? stateZipMatch[1] : null;
+    const city = state && parts.length >= 2 ? parts[parts.length - 2] : null;
 
     try {
       insert.run(
