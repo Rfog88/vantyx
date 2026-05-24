@@ -5,11 +5,12 @@ name: kpi-rollup
 description: Compute the morning KPI digest (leads scraped, ≥65 leads, demos built, agent quota burn) and post via board-notify Tier 0 if delta-worthy.
 metadata:
   requires_env:
-    - DATABASE_URL
+    - LEADS_DB_PATH        # optional; default /home/paperclip/vantyx-leads.sqlite
     - DISCORD_WEBHOOK_URL
+    - NODE_OPTIONS         # set to --experimental-sqlite on Node 22.x
   implementation: skills/kpi-rollup/run.mjs
   primary_users: [ceo, cto, cmo]
-  status: stub-needs-paperclip-api
+  storage: sqlite (read-only here; populated by gmaps-scrape + lead-score)
 ---
 
 # kpi-rollup
@@ -57,7 +58,7 @@ from average — otherwise stay silent (no "all systems normal" pings).
 
 ## Implementation status
 
-Stub for Phase 1: the leads query is implementable now; the Paperclip
-budget-endpoint call is stubbed pending CTO confirming the API path. Live
-version ships in Commit 7 (Phase 1 deploy) once CTO + developer confirm
-endpoints.
+Live for the leads-pipeline metrics (queries the SQLite store directly). The
+Paperclip per-agent budget metric is deferred until we wire `PAPERCLIP_API_TOKEN`
+properly; for now `kpi-rollup` reports lead-pipeline numbers only and skips
+budget burn.

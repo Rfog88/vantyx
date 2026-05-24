@@ -5,9 +5,11 @@ name: lead-score
 description: Apply the Vantyx 0–100 lead-scoring rubric to leads with stage='new' and missing scores; update site_lighthouse and site_age_signal in the process.
 metadata:
   requires_env:
-    - DATABASE_URL
+    - LEADS_DB_PATH        # optional; default /home/paperclip/vantyx-leads.sqlite
+    - NODE_OPTIONS         # set to --experimental-sqlite on Node 22.x
   implementation: skills/lead-score/run.mjs
   primary_users: [sdr]
+  storage: sqlite (shared with gmaps-scrape)
 ---
 
 # lead-score

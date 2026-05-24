@@ -6,10 +6,12 @@ description: Scrape Google Maps Places for local businesses in a (zip, radius, n
 metadata:
   requires_env:
     - SERPAPI_KEY
-    - DATABASE_URL    # set by Paperclip's embedded Postgres bridge
+    - LEADS_DB_PATH        # optional; default /home/paperclip/vantyx-leads.sqlite
+    - NODE_OPTIONS         # set to --experimental-sqlite on Node 22.x
   implementation: skills/gmaps-scrape/run.mjs
   cost_per_call_usd: 0.01   # SerpAPI Developer plan
   primary_users: [sdr]
+  storage: sqlite (node:sqlite, file-based, no DB server required)
 ---
 
 # gmaps-scrape
@@ -54,6 +56,15 @@ Accepted niches: `electrician`, `plumber`, `hvac`, `roofer`, `gc` (general contr
 Node ESM script at `skills/gmaps-scrape/run.mjs`. Calls SerpAPI's
 `https://serpapi.com/search.json` with `engine=google_maps`. Reads
 `SERPAPI_KEY` from env (bound per plan Section 12 step "Bind to an agent").
+
+Storage: SQLite via Node's built-in `node:sqlite` module. File path defaults
+to `/home/paperclip/vantyx-leads.sqlite`; override via `LEADS_DB_PATH` env.
+Schema is auto-initialized on first run (`CREATE TABLE IF NOT EXISTS`) — no
+manual migration needed.
+
+**Required env on Node 22.x:** `NODE_OPTIONS=--experimental-sqlite`. Bind this
+at project level so all DB-touching skills inherit it. Skill returns a clear
+`adapter-broken / node_sqlite_unavailable` error if the flag is missing.
 
 ## Failure modes
 

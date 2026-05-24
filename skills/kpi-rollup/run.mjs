@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// kpi-rollup — morning digest of yesterday's lead-pipeline + agent metrics.
+// kpi-rollup — morning digest of yesterday's lead-pipeline metrics.
 // Posts via board-notify Tier 0 only if delta-worthy.
+//
+// Storage: node:sqlite (requires NODE_OPTIONS=--experimental-sqlite on Node 22.x).
 //
 // Invocation: node skills/kpi-rollup/run.mjs [--window daily|weekly]
 
@@ -8,43 +10,87 @@ import { parseArgs } from "node:util";
 import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import pg from "pg";
 
-const { Client } = pg;
+let DatabaseSync;
+try {
+  ({ DatabaseSync } = await import("node:sqlite"));
+} catch (e) {
+  console.error(JSON.stringify({
+    error: "adapter-broken",
+    reason: "node_sqlite_unavailable",
+    detail: "Bind NODE_OPTIONS=--experimental-sqlite at project or agent env level.",
+    message: e.message,
+  }));
+  process.exit(3);
+}
+
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..", "..");
 
-async function leadsMetrics(client, hours) {
-  const r = await client.query(`
-    SELECT
-      COUNT(*) FILTER (WHERE created_at > now() - interval '${hours} hours') AS scraped,
-      COUNT(*) FILTER (WHERE created_at > now() - interval '${hours} hours' AND score >= 65) AS high_score,
-      COUNT(*) FILTER (WHERE updated_at > now() - interval '${hours} hours' AND stage = 'demo_built') AS demos_built,
-      COUNT(*) FILTER (WHERE updated_at > now() - interval '${hours} hours' AND stage = 'outreach_sent') AS outreach_sent
-    FROM leads
-  `);
-  return r.rows[0];
+const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS leads (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    company_id TEXT,
+    name TEXT, phone TEXT, email TEXT, website TEXT,
+    niche TEXT, city TEXT, state TEXT, zip TEXT,
+    gmaps_rating REAL, review_count INTEGER,
+    site_lighthouse INTEGER, site_age_signal TEXT,
+    score INTEGER,
+    stage TEXT DEFAULT 'new',
+    demo_url TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+`;
+
+function openDb() {
+  const path = process.env.LEADS_DB_PATH || "/home/paperclip/vantyx-leads.sqlite";
+  const db = new DatabaseSync(path);
+  db.exec(SCHEMA);
+  return db;
 }
 
-async function priorAverages(client, hours, days) {
-  // 7-day moving average for the same window.
-  const r = await client.query(`
+function leadsMetrics(db, hours) {
+  const row = db.prepare(`
+    SELECT
+      SUM(CASE WHEN created_at > datetime('now', '-${hours} hours') THEN 1 ELSE 0 END) AS scraped,
+      SUM(CASE WHEN created_at > datetime('now', '-${hours} hours') AND score >= 65 THEN 1 ELSE 0 END) AS high_score,
+      SUM(CASE WHEN updated_at > datetime('now', '-${hours} hours') AND stage = 'demo_built' THEN 1 ELSE 0 END) AS demos_built,
+      SUM(CASE WHEN updated_at > datetime('now', '-${hours} hours') AND stage = 'outreach_sent' THEN 1 ELSE 0 END) AS outreach_sent
+    FROM leads
+  `).get();
+  return {
+    scraped: row?.scraped || 0,
+    high_score: row?.high_score || 0,
+    demos_built: row?.demos_built || 0,
+    outreach_sent: row?.outreach_sent || 0,
+  };
+}
+
+function priorAverages(db, hours, days) {
+  // Average daily count over the prior `days` days, excluding the most recent window.
+  const row = db.prepare(`
     SELECT
       AVG(daily.scraped) AS scraped_avg,
       AVG(daily.high_score) AS high_score_avg,
       AVG(daily.demos_built) AS demos_built_avg
     FROM (
       SELECT
-        date_trunc('day', created_at) AS d,
+        date(created_at) AS d,
         COUNT(*) AS scraped,
-        COUNT(*) FILTER (WHERE score >= 65) AS high_score,
-        COUNT(*) FILTER (WHERE stage = 'demo_built') AS demos_built
+        SUM(CASE WHEN score >= 65 THEN 1 ELSE 0 END) AS high_score,
+        SUM(CASE WHEN stage = 'demo_built' THEN 1 ELSE 0 END) AS demos_built
       FROM leads
-      WHERE created_at > now() - interval '${days} days' AND created_at < now() - interval '${hours} hours'
+      WHERE created_at > datetime('now', '-${days} days')
+        AND created_at < datetime('now', '-${hours} hours')
       GROUP BY 1
     ) daily
-  `);
-  return r.rows[0];
+  `).get();
+  return {
+    scraped_avg: row?.scraped_avg || 0,
+    high_score_avg: row?.high_score_avg || 0,
+    demos_built_avg: row?.demos_built_avg || 0,
+  };
 }
 
 function deltaPct(actual, avg) {
@@ -69,17 +115,10 @@ async function main() {
   const hours = isWeekly ? 168 : 24;
   const baselineDays = isWeekly ? 28 : 7;
 
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    console.error(JSON.stringify({ error: "api-key-missing", service: "database" }));
-    process.exit(3);
-  }
-  const client = new Client({ connectionString: dbUrl });
-  await client.connect();
-
-  const m = await leadsMetrics(client, hours);
-  const avg = await priorAverages(client, hours, baselineDays);
-  await client.end();
+  const db = openDb();
+  const m = leadsMetrics(db, hours);
+  const avg = priorAverages(db, hours, baselineDays);
+  db.close();
 
   const deltas = [
     { name: "scraped",       value: m.scraped,       delta: deltaPct(m.scraped, avg.scraped_avg) },

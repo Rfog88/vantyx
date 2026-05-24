@@ -1,15 +1,24 @@
 #!/usr/bin/env node
-// gmaps-scrape — SerpAPI google_maps → Vantyx leads table.
-// Invocation: node skills/gmaps-scrape/run.mjs --zip 45801 --radius 50 --niche electrician
+// gmaps-scrape — SerpAPI google_maps → Vantyx leads SQLite store.
+// Storage: node:sqlite (requires Node 22.5+ and NODE_OPTIONS=--experimental-sqlite
+//          OR run node with --experimental-sqlite flag).
 //
-// STATUS: scaffolded. The SerpAPI call + DB insert path is implemented; the
-// website-health probe is left as a TODO for `lead-score` skill to populate
-// via a second pass.
+// Invocation: node skills/gmaps-scrape/run.mjs --zip 45801 --radius 50 --niche electrician
 
 import { parseArgs } from "node:util";
-import pg from "pg";
 
-const { Client } = pg;
+let DatabaseSync;
+try {
+  ({ DatabaseSync } = await import("node:sqlite"));
+} catch (e) {
+  console.error(JSON.stringify({
+    error: "adapter-broken",
+    reason: "node_sqlite_unavailable",
+    detail: "Bind NODE_OPTIONS=--experimental-sqlite at project or agent env level. node:sqlite is experimental in Node 22.x.",
+    message: e.message,
+  }));
+  process.exit(3);
+}
 
 const NICHE_QUERIES = {
   electrician: "electrician",
@@ -19,9 +28,39 @@ const NICHE_QUERIES = {
   gc: "general contractor",
 };
 
-const TARGET_METROS = new Set([
-  "Lima", "Findlay", "Toledo", "Columbus", "Dayton",
-]);
+const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS leads (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    company_id TEXT,
+    name TEXT,
+    phone TEXT,
+    email TEXT,
+    website TEXT,
+    niche TEXT,
+    city TEXT,
+    state TEXT,
+    zip TEXT,
+    gmaps_rating REAL,
+    review_count INTEGER,
+    site_lighthouse INTEGER,
+    site_age_signal TEXT,
+    score INTEGER,
+    stage TEXT DEFAULT 'new',
+    demo_url TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS leads_stage_score_idx ON leads(stage, score);
+  CREATE INDEX IF NOT EXISTS leads_niche_zip_idx  ON leads(niche, zip);
+  CREATE INDEX IF NOT EXISTS leads_updated_at_idx ON leads(updated_at DESC);
+`;
+
+function openDb() {
+  const path = process.env.LEADS_DB_PATH || "/home/paperclip/vantyx-leads.sqlite";
+  const db = new DatabaseSync(path);
+  db.exec(SCHEMA);
+  return db;
+}
 
 async function main() {
   const { values } = parseArgs({
@@ -73,14 +112,14 @@ async function main() {
   const data = await res.json();
   const places = data.local_results || [];
 
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    console.error(JSON.stringify({ error: "api-key-missing", service: "database" }));
-    process.exit(3);
-  }
-
-  const client = new Client({ connectionString: dbUrl });
-  await client.connect();
+  const db = openDb();
+  const dupCheck = db.prepare(
+    "SELECT 1 FROM leads WHERE (phone = ? AND ? <> '') OR (website = ? AND ? <> '') LIMIT 1"
+  );
+  const insert = db.prepare(`
+    INSERT INTO leads (name, phone, website, niche, city, state, zip, gmaps_rating, review_count, stage)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
+  `);
 
   let scraped = places.length;
   let inserted = 0;
@@ -92,20 +131,23 @@ async function main() {
     const website = (p.website || "").toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "");
     if (!phone && !website) { errors++; continue; }
 
-    const dup = await client.query(
-      "SELECT 1 FROM leads WHERE (phone = $1 AND $1 <> '') OR (website = $2 AND $2 <> '') LIMIT 1",
-      [phone, website]
-    );
-    if (dup.rowCount > 0) { duplicates++; continue; }
+    const dup = dupCheck.get(phone, phone, website, website);
+    if (dup) { duplicates++; continue; }
 
     const city = p.address?.split(",").slice(-3, -2)[0]?.trim() || null;
     const state = p.address?.match(/\b([A-Z]{2})\b/)?.[1] || null;
 
     try {
-      await client.query(
-        `INSERT INTO leads (name, phone, website, niche, city, state, zip, gmaps_rating, review_count, stage)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'new')`,
-        [p.title, phone || null, website || null, niche, city, state, zip, p.rating || null, p.reviews || null]
+      insert.run(
+        p.title || null,
+        phone || null,
+        website || null,
+        niche,
+        city,
+        state,
+        zip,
+        p.rating || null,
+        p.reviews || null
       );
       inserted++;
     } catch (e) {
@@ -113,9 +155,9 @@ async function main() {
     }
   }
 
-  await client.end();
+  db.close();
 
-  console.log(JSON.stringify({ scraped, inserted, duplicates, errors, zip, niche }));
+  console.log(JSON.stringify({ scraped, inserted, duplicates, errors, zip, niche, db: process.env.LEADS_DB_PATH || "/home/paperclip/vantyx-leads.sqlite" }));
 }
 
 main().catch((e) => {

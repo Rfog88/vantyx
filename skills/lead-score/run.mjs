@@ -3,26 +3,60 @@
 // Reads `score IS NULL` rows, runs a website-health probe, writes back score
 // + site_lighthouse + site_age_signal.
 //
+// Storage: node:sqlite (requires NODE_OPTIONS=--experimental-sqlite on Node 22.x).
+//
 // Invocation: node skills/lead-score/run.mjs [--limit 100] [--rescore]
 
 import { parseArgs } from "node:util";
-import pg from "pg";
 
-const { Client } = pg;
+let DatabaseSync;
+try {
+  ({ DatabaseSync } = await import("node:sqlite"));
+} catch (e) {
+  console.error(JSON.stringify({
+    error: "adapter-broken",
+    reason: "node_sqlite_unavailable",
+    detail: "Bind NODE_OPTIONS=--experimental-sqlite at project or agent env level.",
+    message: e.message,
+  }));
+  process.exit(3);
+}
 
 const TARGET_METROS = new Set([
   "lima", "findlay", "toledo", "columbus", "dayton",
 ]);
 
-// Ohio local area codes
 const LOCAL_AREA_CODES = new Set([
-  "419", "567",        // Lima / NW Ohio
+  "419", "567",        // NW Ohio (Lima)
   "614", "380",        // Columbus
   "937",               // Dayton
   "330", "234",        // NE Ohio
 ]);
 
 const NICHE_SET = new Set(["electrician", "plumber", "hvac", "roofer", "gc"]);
+
+const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS leads (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    company_id TEXT,
+    name TEXT, phone TEXT, email TEXT, website TEXT,
+    niche TEXT, city TEXT, state TEXT, zip TEXT,
+    gmaps_rating REAL, review_count INTEGER,
+    site_lighthouse INTEGER, site_age_signal TEXT,
+    score INTEGER,
+    stage TEXT DEFAULT 'new',
+    demo_url TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+`;
+
+function openDb() {
+  const path = process.env.LEADS_DB_PATH || "/home/paperclip/vantyx-leads.sqlite";
+  const db = new DatabaseSync(path);
+  db.exec(SCHEMA);
+  return db;
+}
 
 async function probeWebsite(url) {
   if (!url) return { lighthouse: null, age_signal: "no-site", has_ssl: false };
@@ -37,8 +71,6 @@ async function probeWebsite(url) {
     const copyrightMatch = html.match(/©|copyright[^0-9]*(\d{4})/i);
     if (copyrightMatch && parseInt(copyrightMatch[1] || "0") < 2022) age_signal = "stale-copyright";
     if (!hasSsl) age_signal = "no-ssl";
-    // Lighthouse probe is left as a NULL for Phase 1 — too expensive to run inline.
-    // Phase 1.5 will wire pagespeed.web.dev / lighthouse-ci as a separate step.
     return { lighthouse: null, age_signal, has_ssl: hasSsl };
   } catch (e) {
     return { lighthouse: null, age_signal: "unreachable", has_ssl: false };
@@ -66,18 +98,16 @@ async function main() {
   const limit = parseInt(values.limit, 10);
   const rescore = values.rescore;
 
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    console.error(JSON.stringify({ error: "api-key-missing", service: "database" }));
-    process.exit(3);
-  }
-  const client = new Client({ connectionString: dbUrl });
-  await client.connect();
+  const db = openDb();
 
   const where = rescore
     ? "stage = 'new'"
     : "stage = 'new' AND score IS NULL";
-  const { rows } = await client.query(`SELECT * FROM leads WHERE ${where} LIMIT $1`, [limit]);
+  const rows = db.prepare(`SELECT * FROM leads WHERE ${where} LIMIT ?`).all(limit);
+
+  const update = db.prepare(
+    "UPDATE leads SET score = ?, site_lighthouse = ?, site_age_signal = ?, updated_at = datetime('now') WHERE id = ?"
+  );
 
   let scored = 0, high_score = 0, sub65 = 0, no_site = 0;
 
@@ -98,18 +128,15 @@ async function main() {
       review_age_months: 12,    // placeholder; Phase 2 will pull true GBP review history
     });
 
-    await client.query(
-      "UPDATE leads SET score = $1, site_lighthouse = $2, site_age_signal = $3, updated_at = now() WHERE id = $4",
-      [score, probe.lighthouse, probe.age_signal, r.id]
-    );
+    update.run(score, probe.lighthouse, probe.age_signal, r.id);
 
     scored++;
     if (score >= 65) high_score++;
     else sub65++;
   }
 
-  await client.end();
-  console.log(JSON.stringify({ scored, high_score, sub65, no_site }));
+  db.close();
+  console.log(JSON.stringify({ scored, high_score, sub65, no_site, db: process.env.LEADS_DB_PATH || "/home/paperclip/vantyx-leads.sqlite" }));
 }
 
 main().catch((e) => {
