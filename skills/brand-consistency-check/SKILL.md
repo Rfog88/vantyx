@@ -68,7 +68,12 @@ where 0 = perfect match and 100 = totally drifted.
    - Schema.org JSON-LD in footer
    - Lighthouse mobile ≥85
 
-## Implementation status
+## Implementation
 
-Stub for Phase 1: full implementation deferred to Phase 1.5 when the demo
-pipeline is live. Developer implements when CTO files the Issue.
+Phase 1.5 live: HTTP-fetch + regex/HTML-parse against the deployed preview;
+palette diff in LAB color space against the per-client brand file. Lighthouse
+audit deferred to Phase 2 (needs a real Lighthouse run, not a check).
+
+Returns `drift_score 0-100` (lower is better) and `passes_threshold` boolean
+(true if drift_score ≤ 15). Findings array has per-check `{level, msg}` so
+QA's rejection comment writes itself.

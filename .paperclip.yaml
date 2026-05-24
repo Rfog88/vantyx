@@ -111,21 +111,43 @@ routines:
       Paperclip UI after diagnosis.
 
   # ---------------------------------------------------------------
-  # Phase 1.5 — demo-build-watcher — added in Commit 8.
-  # Commented out until demo-gen agent exists.
+  # demo-build-watcher — every 15 min (Phase 1.5).
+  # demo-gen polls SQLite for stage='new' AND score>=65, runs the full
+  # demo pipeline. Caps at 3/cycle for Vercel quota.
+  #
+  # NOTE: routines are NOT imported by companies.sh — Ryan must create this
+  # in the Paperclip UI (Routines → + Create routine) using the values below.
+  # This block stays for documentation + future tool support.
   # ---------------------------------------------------------------
-  # demo-build-watcher:
-  #   triggers:
-  #     - kind: schedule
-  #       cronExpression: "*/15 * * * *"
-  #       timezone: America/New_York
-  #   assigneeAgentSlug: demo-gen
-  #   concurrencyPolicy: queue
-  #   title: "Demo-build watcher (15-min)"
-  #   prompt: |
-  #     Query: SELECT * FROM leads WHERE stage='new' AND score>=65 LIMIT 3.
-  #     For each: brand-extract → template-clone → template-fill → vercel-deploy
-  #             → lead-update → notify-cmo-sdr.
+  demo-build-watcher:
+    triggers:
+      - kind: schedule
+        cronExpression: "*/15 * * * *"
+        timezone: America/New_York
+    assigneeAgentSlug: demo-gen
+    concurrencyPolicy: queue
+    catchUpPolicy: skip-missed
+    title: "Demo-build watcher (15-min)"
+    prompt: |
+      Run your HEARTBEAT.md step 2 — process the demo-build pipeline.
+
+      Query SQLite: SELECT id, name, website, niche, city, state, zip, score
+      FROM leads WHERE stage='new' AND score>=65
+      ORDER BY score DESC LIMIT 3.
+
+      For each lead:
+        1. Check shared/brand/clients/<slug>.md
+           - If missing: brand-extract + @ux-designer mention, then skip.
+           - If present: continue.
+        2. template-clone → /tmp/demos/<slug>
+        3. template-fill (uses lead row + brand file)
+        4. vercel-deploy → captures URL
+        5. lead-update (stage='demo_built', demo_url=<url>)
+        6. notify-cmo-sdr Tier 0
+
+      Cap 3 per cycle (Vercel quota guard).
+      On any error: diagnose-why-work-stopped, then comment + escalate per
+      your AGENTS.md rules.
 
 # ---------------------------------------------------------------
 # Project Env defaults (overrides agent env on matching keys).

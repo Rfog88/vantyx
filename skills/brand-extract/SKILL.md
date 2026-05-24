@@ -2,40 +2,39 @@
 schema: agentcompanies/v1
 kind: skill
 name: brand-extract
-description: Use Playwright headless to fetch a lead's current website and extract logo, dominant colors, typography hints, services, NAP, and H1 voice into a brand-extraction payload for UXDesigner.
+description: Lightweight HTTP scraper that pulls logo, palette, fonts, services, NAP from a lead's existing website. No Playwright; fast and dependency-free.
 metadata:
-  requires_env:
-    - DATABASE_URL
   implementation: skills/brand-extract/run.mjs
-  cost_per_call_usd: 0      # local Playwright; only compute cost
-  primary_users: [ux-designer, demo-gen]
-  status: stub-phase-1.5
+  primary_users: [demo-gen, ux-designer]
+  cost_per_call_usd: 0
 ---
 
 # brand-extract
 
-Headless-browser scrape of a lead's existing website. Produces a JSON
-payload that UXDesigner uses to author `shared/brand/clients/<slug>.md`.
+HTTP-fetch + regex/HTML-parse a lead's existing website. Returns brand
+metadata as JSON for UXDesigner to author the per-client brand file at
+`shared/brand/clients/<lead-slug>.md`.
 
 ## When to use
 
-- Phase 1.5+: triggered automatically when demo-gen picks up a lead at
-  `stage='new'` with `score >= 65`.
-- Ad-hoc by UXDesigner when manually preparing a brand file for a lead.
+- `demo-gen` heartbeat, step 1 of the pipeline, when a lead enters
+  `stage='new'` with `score>=65`.
+- Ad-hoc by UXDesigner when manually preparing a brand file.
 
 ## When NOT to use
 
-- Phase 1 (no demo pipeline yet) — UXDesigner authors brand files manually
-  from gmaps_rating + niche heuristics.
-- On leads without a website (`website IS NULL`) — fall back to niche-default
-  palette per UXDesigner's `_catalog.md`.
+- For leads with no website — the skill detects this and returns a niche-
+  default payload so the pipeline can continue.
+- For leads where UXDesigner has already authored the brand file (no need to
+  re-extract).
 
 ## Inputs
 
 ```json
 {
-  "lead_id": "<uuid>",
-  "url": "https://acme-electric.com"
+  "lead-id": "<uuid>",
+  "url": "https://acme-electric.com",
+  "niche": "electrician"
 }
 ```
 
@@ -43,23 +42,34 @@ payload that UXDesigner uses to author `shared/brand/clients/<slug>.md`.
 
 ```json
 {
-  "logo_url": "...",
-  "palette": ["#0F172A", "#F59E0B", "#FFFFFF"],
-  "fonts": ["Inter", "system-ui"],
+  "logo_url": "https://acme-electric.com/logo.png",
+  "palette": { "primary": "#0F172A", "accent": "#FACC15", "bg": "#FFFFFF", "text": "#111827", "muted": "#6B7280" },
+  "fonts": ["Inter", "Roboto"],
+  "title": "Acme Electric — Lima OH",
   "h1_voice_sample": "Lima's Trusted Electrician Since 2014",
   "services": ["Panel Upgrades", "EV Chargers", "..."],
-  "nap": { "phone": "...", "address": "...", "hours": "..." }
+  "nap": { "phone": "419-555-0101", "email": "...", "city": "Lima", "state": "OH", "zip": "45801" },
+  "_status": "ok",
+  "_palette_candidates": ["#0F172A", "#FACC15", "..."]
 }
 ```
 
-## Implementation
-
-Node ESM with Playwright. Status for Phase 1: stub (see `run.mjs`). Full
-implementation deferred to Phase 1.5 per plan Section 4. Developer will
-implement when CTO files the Issue.
+`_status` can be: `ok` | `no-website` | `unreachable` | `error`.
 
 ## Failure modes
 
-- Site unreachable / timeout → return partial payload with `errors: ["unreachable"]`; UXDesigner falls back to niche defaults.
-- No logo found → omit `logo_url`; UXDesigner will note it for manual upload.
-- Palette extraction confidence low → escalate Tier 1 `decision-needed` to Board (UXDesigner does the escalation, not this skill).
+- Site times out (>12s) → returns `_status: "error"` with niche-default
+  palette. demo-gen continues.
+- Site returns 4xx/5xx → returns `_status: "unreachable"` with niche-default.
+- Site requires JS to render content → we miss client-rendered text. Phase 2
+  will add Playwright for SPAs; Phase 1.5 accepts the gap.
+
+## Implementation notes
+
+- Uses native `fetch` with a 12s timeout.
+- Color extraction = frequency-rank of hex codes in inline/linked CSS. Crude
+  but workable for Phase 1.5; Phase 2 will replace with color-quantize on a
+  screenshot.
+- Font extraction looks at Google Fonts links and `font-family` declarations.
+- Service guess looks for `<ul>` with 3–12 capitalized list items.
+- User-Agent identifies as `VantyxBot/1.0` so it's auditable and respects robots.
