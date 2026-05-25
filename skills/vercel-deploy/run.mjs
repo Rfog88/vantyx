@@ -2,7 +2,7 @@
 // vercel-deploy — production deploy a per-lead Vantyx Web OS clone via Vercel CLI.
 //
 // Invocation:
-//   node skills/vercel-deploy/run.mjs --clone-path /tmp/demos/<slug> --lead-slug <slug> [--scope vantyx]
+//   node skills/vercel-deploy/run.mjs --clone-path /tmp/demos/<slug> --lead-slug <slug> [--lead-id <id>] [--scope rfog88s-projects]
 
 import { parseArgs } from "node:util";
 import { spawnSync } from "node:child_process";
@@ -13,12 +13,14 @@ async function main() {
     options: {
       "clone-path": { type: "string" },
       "lead-slug": { type: "string" },
-      scope: { type: "string", default: process.env.VERCEL_SCOPE || "vantyx" },
+      "lead-id": { type: "string" },
+      scope: { type: "string", default: process.env.VERCEL_SCOPE || "rfog88s-projects" },
     },
   });
 
   const clonePath = values["clone-path"];
   const slug = values["lead-slug"];
+  const leadId = values["lead-id"] || null;
 
   if (!clonePath || !slug) {
     console.error(JSON.stringify({ error: "decision-needed", reason: "missing required arg(s)", got: { clonePath, slug } }));
@@ -35,7 +37,12 @@ async function main() {
     process.exit(3);
   }
 
-  const projectName = `preview-${slug}`.substring(0, 52);   // Vercel project name max 52 chars
+  // VAN-60: avoid per-slug alias collisions by encoding lead identity.
+  const leadSuffix = leadId
+    ? String(leadId).toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8)
+    : null;
+  const projectBase = leadSuffix ? `preview-${slug}-${leadSuffix}` : `preview-${slug}`;
+  const projectName = projectBase.substring(0, 52);   // Vercel project name max 52 chars
   const args = [
     "--prod",
     "--yes",                    // skip interactive prompts
@@ -84,6 +91,8 @@ async function main() {
 
   console.log(JSON.stringify({
     url,
+    project_name: projectName,
+    lead_suffix: leadSuffix,
     project_id: projectMatch?.[0] || null,
     deployment_id: deploymentMatch?.[0] || null,
     duration_ms,
