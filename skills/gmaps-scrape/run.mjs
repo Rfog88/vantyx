@@ -48,7 +48,12 @@ const SCHEMA = `
     stage TEXT DEFAULT 'new',
     demo_url TEXT,
     created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
+    updated_at TEXT DEFAULT (datetime('now')),
+    license_no TEXT,
+    service_area_zips TEXT,
+    testimonials TEXT,
+    gallery TEXT,
+    tagline TEXT
   );
   CREATE INDEX IF NOT EXISTS leads_stage_score_idx ON leads(stage, score);
   CREATE INDEX IF NOT EXISTS leads_niche_zip_idx  ON leads(niche, zip);
