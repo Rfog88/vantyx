@@ -46,7 +46,11 @@ without CTO approval.
   - `pnpm build`
   - `pnpm lighthouse <url>`
 - **Vercel deploy command:**
-  - `vercel --prod --token $VERCEL_TOKEN --scope vantyx --name preview-<slug>`
+  - `vercel --prod --token $VERCEL_TOKEN --scope rfog88s-projects --name preview-<slug>`
+    (Scope is `rfog88s-projects` — the only team available under the current
+    `$VERCEL_TOKEN`. No `vantyx` team exists yet; CTO patched the scope on
+    2026-05-24 after the `vantyx` scope failed with "The specified scope does
+    not exist". If the scope ever changes, CTO updates this file.)
 - **CTO preferences observed:**
   - Cipher rejects PRs that don't include a regression test on bug fixes.
   - Cipher rejects PRs that touch >1 component for a single-component Issue.
