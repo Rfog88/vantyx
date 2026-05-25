@@ -5,13 +5,32 @@
 //   echo '{"lead-name":"...","demo-url":"...","score":75,"niche":"electrician","city":"Lima, OH"}' \
 //     | node skills/notify-cmo-sdr/run.mjs
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, "..", "..");
+
+// Locate a sibling skill's run.mjs. Skills are installed under
+// `<root>/__catalog__/<name>--<hash>/run.mjs`, so resolve by scanning the
+// parent catalog for an entry that matches the skill name (with or without
+// the `--<hash>` suffix). Falls back to `<root>/skills/<name>/run.mjs` for
+// dev layouts where skills live as plain directories.
+function resolveSiblingSkill(name) {
+  const catalogDir = dirname(here);
+  if (existsSync(catalogDir) && statSync(catalogDir).isDirectory()) {
+    const entries = readdirSync(catalogDir);
+    const match = entries.find((d) => d === name || d.startsWith(`${name}--`));
+    if (match) {
+      const p = resolve(catalogDir, match, "run.mjs");
+      if (existsSync(p)) return p;
+    }
+  }
+  const devPath = resolve(here, "..", "..", "skills", name, "run.mjs");
+  if (existsSync(devPath)) return devPath;
+  throw new Error(`sibling skill not found: ${name} (searched ${catalogDir} and ${devPath})`);
+}
 
 async function main() {
   const raw = readFileSync(0, "utf8");
@@ -49,9 +68,21 @@ async function main() {
     "_Outreach: send the preview link with the existing template; no edit needed unless brand-extract had warnings._",
   ].filter(Boolean).join("\n");
 
+  let scriptPath;
+  try { scriptPath = resolveSiblingSkill("board-notify"); }
+  catch (e) {
+    console.error(JSON.stringify({
+      error: "adapter-broken",
+      service: "board-notify",
+      reason: "board_notify_not_found",
+      message: e.message,
+    }));
+    process.exit(5);
+  }
+
   const proc = spawnSync(
     "node",
-    [resolve(repoRoot, "skills", "board-notify", "run.mjs")],
+    [scriptPath],
     {
       input: JSON.stringify({ tier: 0, title, body, sms_on_tier_2: false }),
       encoding: "utf8",
