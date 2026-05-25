@@ -29,12 +29,16 @@ On each heartbeat:
      c. Run `template-fill` with the lead row + the brand stdout captured in
         step a (do NOT re-read brand files) → writes `site.config.ts`.
      d. Run `vercel-deploy` → returns preview URL.
-     e. Run `lead-update` with `{lead_id, stage: 'demo_built', demo_url}`.
-     f. **Hand off to Quinn (QA).** Create a child Issue
+     e. Produce and capture `{top_change_*}` preview notes for this lead:
+        `top_change_load_time`, `top_change_header_cta`,
+        `top_change_stock_photo` (1-2 sentences each, lead-specific).
+     f. Run `lead-update` with `{lead_id, stage: 'demo_built', demo_url}`.
+     g. **Hand off to Quinn (QA).** Create a child Issue
         `demo-review-gate: <slug>` under your current watcher Issue,
         assigned to `988c24a3-dfce-47e8-91c3-43b09c0ae4c8`, status `todo`,
         priority `high`. Include the lead facts, `preview_url`, and
-        `site_config_path` in the description (see AGENTS.md template).
+        `site_config_path` and all three `{top_change_*}` notes in the
+        description (see AGENTS.md template).
         Do NOT call `notify-cmo-sdr` — that is Quinn's job after Tier-1
         board approval. If Quinn rejects, she reassigns the gate Issue
         back to you; iterate then create a fresh gate Issue.

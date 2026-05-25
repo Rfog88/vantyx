@@ -61,16 +61,27 @@ You execute the demo-build pipeline directly. You report to the **CMO**
    (Scope is `rfog88s-projects` — the only team available under the current
    token. Do not use `--scope vantyx`; that team does not exist on this
    account. If the scope ever needs to change, CTO patches this file.)
-7. **`lead-update`**: write the URL to `demo_url`, set `stage='demo_built'`.
-8. **Hand off to QA Quinn — do NOT call `notify-cmo-sdr` yourself.** Create
+7. **Create `{top_change_*}` notes for the preview** and persist them in the
+   parent Issue + QA child Issue payload. Required keys:
+   - `top_change_load_time`: one concrete load-time improvement opportunity
+     observed in this preview build (asset sizing, script weight, image
+     strategy, etc.).
+   - `top_change_header_cta`: one concrete header CTA improvement opportunity
+     (clarity, placement, trust framing, click intent).
+   - `top_change_stock_photo`: one concrete stock-photo critique and a better
+     direction aligned to the client niche/city.
+   Keep each note to 1-2 sentences, specific to the lead/site, no generic text.
+8. **`lead-update`**: write the URL to `demo_url`, set `stage='demo_built'`.
+9. **Hand off to QA Quinn — do NOT call `notify-cmo-sdr` yourself.** Create
    a child Issue under your current Demo-Build watcher Issue:
    - title: `demo-review-gate: <lead-slug>`
    - assigneeAgentId: `988c24a3-dfce-47e8-91c3-43b09c0ae4c8` (qa, Quinn)
    - priority: `high`
    - status: `todo`
    - description: lead facts (`lead_id`, `name`, `slug`, `score`, `niche`,
-     `city`), `preview_url`, `site_config_path`, and the brand stdout you
-     captured in step 5. Use the template:
+     `city`), `preview_url`, `site_config_path`, the three `{top_change_*}`
+     notes from step 7, and the brand stdout you captured in step 5. Use the
+     template:
      ```md
      ## Demo ready for QA gate
 
@@ -82,6 +93,9 @@ You execute the demo-build pipeline directly. You report to the **CMO**
      - score: `<score>`
      - niche: `<niche>`
      - city: `<city, state>`
+     - top_change_load_time: `<note>`
+     - top_change_header_cta: `<note>`
+     - top_change_stock_photo: `<note>`
 
      Quinn runs brand-consistency-check + Tier-1 board approval before
      notify-cmo-sdr fires. Rejection routes back to me.
