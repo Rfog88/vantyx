@@ -140,16 +140,36 @@ async function main() {
     const dup = dupCheck.get(phone, phone, website, website);
     if (dup) { duplicates++; continue; }
 
-    // SerpAPI address formats vary: "1234 Main St, Lima, OH 45801",
-    // "Lima, OH 45801", or sometimes without ZIP. City is the segment
-    // immediately before "STATE ZIP". (Sami flagged the old slice(-3,-2)
-    // logic as misaligned on VAN-1.)
+    // SerpAPI address formats vary:
+    //   "1234 Main St, Lima, OH 45801"  (3+ parts: street, city, STATE ZIP)
+    //   "Lima, OH 45801"                (2 parts: city, STATE ZIP)
+    //   "1234 Main St, OH 45801"        (2 parts: street, STATE ZIP — NO city)
+    //   "Lima, OH"                      (2 parts: city, STATE — no zip)
+    // We parse STATE and ZIP from the last segment, and treat parts[-2] as
+    // city ONLY when parts.length >= 3 (i.e. a street is in front of it).
+    // VAN-16: a previous bug accepted parts.length === 2 and put streets in
+    // the city column; ZIP was unconditionally overwritten with the search
+    // territory ZIP. Both fixed here.
     const addr = p.address || "";
     const parts = addr.split(",").map(s => s.trim()).filter(Boolean);
     const lastPart = parts[parts.length - 1] || "";
-    const stateZipMatch = lastPart.match(/^([A-Z]{2})(?:\s+\d{5})?$/);
+    const stateZipMatch = lastPart.match(/^([A-Z]{2})(?:\s+(\d{5}))?$/);
     const state = stateZipMatch ? stateZipMatch[1] : null;
-    const city = state && parts.length >= 2 ? parts[parts.length - 2] : null;
+    const parsedZip = stateZipMatch && stateZipMatch[2] ? stateZipMatch[2] : null;
+
+    // VAN-16 guard: a street-shaped string is never a city. Used both as
+    // an insert guard and to distinguish 2-part "<city>, STATE ZIP" from
+    // 2-part "<street>, STATE ZIP" (SerpAPI omits city for some places).
+    const STREET_REGEX = /^\d|(?:\s(?:St|Ave|Rd|Dr|Blvd|Ln|Way|Ct|Pl|Pkwy|Hwy|Trail|Ter)\.?)(?:\s|$)/i;
+    let city = null;
+    if (state) {
+      const candidate = parts.length >= 3
+        ? parts[parts.length - 2]
+        : parts.length === 2
+          ? parts[0]
+          : null;
+      if (candidate && !STREET_REGEX.test(candidate)) city = candidate;
+    }
 
     try {
       insert.run(
@@ -159,7 +179,7 @@ async function main() {
         niche,
         city,
         state,
-        zip,
+        parsedZip,
         p.rating || null,
         p.reviews || null
       );
