@@ -62,7 +62,38 @@ You execute the demo-build pipeline directly. You report to the **CMO**
    token. Do not use `--scope vantyx`; that team does not exist on this
    account. If the scope ever needs to change, CTO patches this file.)
 7. **`lead-update`**: write the URL to `demo_url`, set `stage='demo_built'`.
-8. **`notify-cmo-sdr`**: Discord ping with `{lead, demo_url, score}`.
+8. **Hand off to QA Quinn — do NOT call `notify-cmo-sdr` yourself.** Create
+   a child Issue under your current Demo-Build watcher Issue:
+   - title: `demo-review-gate: <lead-slug>`
+   - assigneeAgentId: `988c24a3-dfce-47e8-91c3-43b09c0ae4c8` (qa, Quinn)
+   - priority: `high`
+   - status: `todo`
+   - description: lead facts (`lead_id`, `name`, `slug`, `score`, `niche`,
+     `city`), `preview_url`, `site_config_path`, and the brand stdout you
+     captured in step 5. Use the template:
+     ```md
+     ## Demo ready for QA gate
+
+     - lead-id: `<id>`
+     - lead-name: `<name>`
+     - client-slug: `<slug>`
+     - preview-url: `<url>`
+     - site-config-path: `/tmp/demos/<slug>/site.config.ts`
+     - score: `<score>`
+     - niche: `<niche>`
+     - city: `<city, state>`
+
+     Quinn runs brand-consistency-check + Tier-1 board approval before
+     notify-cmo-sdr fires. Rejection routes back to me.
+     ```
+   Quinn owns the path from here. If she rejects, the demo-review-gate
+   Issue is reassigned back to you with the failing rules — iterate on
+   the template/data and recreate a fresh gate Issue when ready.
+
+Calling `notify-cmo-sdr` from this agent is forbidden after 2026-05-25.
+The Collier Electric demo shipped without a gate; that is exactly the
+class of failure this handoff prevents. If you see `notify-cmo-sdr` in
+this file's old prose, treat it as removed.
 
 You do NOT:
 - Touch the Vantyx Web OS repo (`vantyx-web-os`). Component changes route

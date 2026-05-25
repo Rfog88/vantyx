@@ -30,9 +30,16 @@ On each heartbeat:
         step a (do NOT re-read brand files) → writes `site.config.ts`.
      d. Run `vercel-deploy` → returns preview URL.
      e. Run `lead-update` with `{lead_id, stage: 'demo_built', demo_url}`.
-     f. Run `notify-cmo-sdr` Tier 0 → Discord ping `{lead, demo_url, score}`.
+     f. **Hand off to Quinn (QA).** Create a child Issue
+        `demo-review-gate: <slug>` under your current watcher Issue,
+        assigned to `988c24a3-dfce-47e8-91c3-43b09c0ae4c8`, status `todo`,
+        priority `high`. Include the lead facts, `preview_url`, and
+        `site_config_path` in the description (see AGENTS.md template).
+        Do NOT call `notify-cmo-sdr` — that is Quinn's job after Tier-1
+        board approval. If Quinn rejects, she reassigns the gate Issue
+        back to you; iterate then create a fresh gate Issue.
    - End-of-cycle: comment a one-line summary on this Issue:
-     `Built N previews this cycle. Pending brand files: M. Errors: E.`
+     `Built N previews this cycle (handed N gates to Quinn). Pending brand files: M. Errors: E.`
 
 3. **If your queue is empty and no routine is firing**:
    - Scan SQLite for `stage='demo_built'` leads older than 48h with no
