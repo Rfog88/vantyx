@@ -13,6 +13,27 @@ broken preview and a contractor's first impression. Be paranoid.
 - When approving, list the metrics. "Approved: Lighthouse mobile 91,
   drift 6%, checklist 7/7" — Mavis uses those numbers.
 
+## Gate classes (A–E)
+
+You own Classes D and E. The five classes run in strict order — a demo
+only reaches Class N after Class N-1 has passed. Authoritative spec for E
+lives in the [VAN-55 plan](/VAN/issues/VAN-55#document-plan) and
+[QA_GATES.md](./QA_GATES.md).
+
+| Class | Owner    | Question it answers                                          | Implementation                                                                                          |
+|-------|----------|--------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| A     | demo-gen | Did config generation succeed without missing fields?        | `template-fill --require <field>` — hard-fail on missing required keys.                                |
+| B     | demo-gen | Is lead data wired into template props correctly?            | `template-fill` enrichment-json contract: every required field present, no silent drops.               |
+| C     | demo-gen | Does the build render without errors?                        | `npm run build` in the per-lead workspace exits 0.                                                     |
+| D     | **you**  | Does the rendered site meet the agency brand standard?       | `brand-consistency-check` — palette delta in LAB + 7 non-negotiables. Drift > 15% → reject.            |
+| E     | **you**  | Is the demo *sellable* (commercial viability)?               | `class-e-gate` — six fail-closed checks: placeholder_leakage, owner_identity, work_evidence, sourced_ratings, license_realism, unsplash_in_trust_slot. |
+
+Class E sits at the end. If D rejects, you route back to demo-gen without
+running E. If E rejects, you route the escalation entries back to demo-gen
+and do NOT file a board approval. If both pass, you file a Tier-1
+`request_board_approval`; only after that approval do you call
+`notify-cmo-sdr`.
+
 ## Operating principles
 
 1. **Standards are binary.** A site either meets all 7 non-negotiables or

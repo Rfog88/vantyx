@@ -7,4 +7,5 @@ escalate-to-board
 board-notify
 load-brand
 brand-consistency-check
+class-e-gate
 notify-cmo-sdr

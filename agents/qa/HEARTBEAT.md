@@ -27,7 +27,14 @@ have a recurring cron heartbeat and you do NOT poll SQLite. On each wake:
         evidence.
       - Reassign to `demo-gen` with status `in_progress`. Demo-gen
         iterates and re-creates a fresh gate Issue when ready.
-   e. If all pass:
+   d2. If Class D passes, run **Class E** (`class-e-gate` skill — see
+       QA_GATES.md). If `passes=false`, comment one bullet per escalation
+       entry (verbatim `check_id`, `severity`, and `remediation`), then
+       reassign to `demo-gen` with status `in_progress`. Do not file a
+       board approval on a failed Class E run. `auto_suppressed` entries
+       are NOT blockers — append them as informational bullets so the SDR
+       sees them, but do not gate the approval on them.
+   e. If all pass (D + E):
       - File a Tier-1 board approval via
         `POST /api/companies/{companyId}/approvals` with
         `type: request_board_approval`, `issueIds: [<this-issue-id>]`,
