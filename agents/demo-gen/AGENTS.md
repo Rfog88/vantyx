@@ -22,10 +22,45 @@ You execute the demo-build pipeline directly. You report to the **CMO**
    <slug>" on the Issue and exit. UXDesigner's heartbeat will pick it up.
 4. **`template-clone`**: shallow `git clone --depth 1
    https://github.com/Rfog88/vantyx-web-os.git /tmp/demos/<lead-slug>`.
-5. **`template-fill`**: write `/tmp/demos/<lead-slug>/site.config.ts` with the
-   lead's brand tokens, services, contact info, hero copy.
+5. **`template-fill`**: invoke the deterministic skill that builds
+   `site.config.ts` from the lead row + brand markdown. The model is
+   **not** in this write path.
+
+   ```bash
+   NODE_OPTIONS=--experimental-sqlite \
+   node /home/paperclip/.paperclip/instances/default/companies/a59f9f5f-a472-4612-909b-c20d07099cd9/codex-home/skills/template-fill/run.mjs \
+     --lead-id <lead-id> \
+     --brand-file shared/brand/clients/<slug>.md \
+     --template-dir /tmp/demos/<slug>
+   ```
+
+   On exit 0 → proceed to `vercel-deploy`. The skill writes
+   `<template-dir>/site.config.ts`, runs its own post-write invariant
+   check (correct `@/lib/site-config` import, no self-import, `export
+   const siteConfig` present), and prints a JSON summary on stdout
+   including any warnings (e.g. brand-file palette gaps, lead.city looked
+   like a street address).
+
+   On any nonzero exit, do NOT deploy. Capture the stderr, comment on
+   VAN-4 with the exit code + lead ID, escalate Tier 2 `adapter-broken`
+   (template-fill) only if the same exit code repeats across 3
+   consecutive leads — otherwise comment on the per-lead Issue and move
+   on.
+
+   **Why this is a script, not prose rules:** versions 1 & 2 of this
+   step (2026-05-24 cycles 3 & 4) tried prose-level "never write X"
+   rules to keep the model from emitting a hallucinated self-import; the
+   model kept emitting it. A sed/grep auto-correction gate (cycle 6
+   mitigation) fixed the one known symptom. VAN-13 (this skill, landed
+   2026-05-24) removes the class of failure — the file structure is now
+   a hardcoded string in `run.mjs`, never a model write. Optional model
+   use is allowed for *data values* via `--enrichment-json`; see the
+   skill's SKILL.md.
 6. **`vercel-deploy`**: `vercel --prod --yes --token $VERCEL_TOKEN --scope
-   vantyx --name preview-<lead-slug>`. Capture the deployed URL.
+   rfog88s-projects --name preview-<lead-slug>`. Capture the deployed URL.
+   (Scope is `rfog88s-projects` — the only team available under the current
+   token. Do not use `--scope vantyx`; that team does not exist on this
+   account. If the scope ever needs to change, CTO patches this file.)
 7. **`lead-update`**: write the URL to `demo_url`, set `stage='demo_built'`.
 8. **`notify-cmo-sdr`**: Discord ping with `{lead, demo_url, score}`.
 
@@ -68,9 +103,10 @@ real volume ~5-20. If you find yourself wanting to bump the cap, that's an
 Issue for CMO to evaluate against Vercel plan limits — not a freelance
 exception.
 
-Read `shared/brand/vantyx.md` AND `shared/brand/clients/<lead-slug>.md`
-before generating any deliverable. Brand consistency is your QA gate before
-deploy.
+Invoke the `load-brand` skill with `--client-slug <lead-slug>` before
+generating any deliverable; treat exit 0 as the brand-consistency gate.
+Do NOT do direct `shared/brand/...` filesystem reads — those resolve
+workspace-relative and will false-block.
 
 ## Vantyx demo mission
 

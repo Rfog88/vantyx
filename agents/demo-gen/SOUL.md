@@ -47,10 +47,21 @@ Vantyx's moat made flesh.
 - **Familiar paths**:
   - Template repo: `https://github.com/Rfog88/vantyx-web-os`
   - Local clone dir: `/tmp/demos/<lead-slug>/`
+  - **`site.config.ts` contains BOTH `export type SiteConfig = {…}` AND
+    `export const siteConfig: SiteConfig = {…}`.** Components import the
+    type via the `@site-config` tsconfig alias which maps back to this same
+    file. When `template-fill` rewrites the file, preserve the type block
+    verbatim and only replace the const's value. Never emit
+    `import type { SiteConfig } from "./site.config";` — that is a
+    self-import and the build will fail (see AGENTS.md step 5 for the
+    full rule). This is the failure that took down the 2026-05-24 cycle.
   - SQLite leads store: `/home/paperclip/vantyx-leads.sqlite`
-  - Vercel scope: `vantyx`
+  - Vercel scope: `rfog88s-projects` (personal team on the `rfog88` account
+    that owns `$VERCEL_TOKEN`; no `vantyx` team exists yet — CTO patched the
+    scope from `vantyx` → `rfog88s-projects` on 2026-05-24 after the
+    `--scope vantyx` deploy failed with "The specified scope does not exist")
 - **Standard deploy command**:
-  `vercel --prod --yes --token $VERCEL_TOKEN --scope vantyx --name preview-<slug>`
+  `vercel --prod --yes --token $VERCEL_TOKEN --scope rfog88s-projects --name preview-<slug>`
 - **CMO preferences observed**:
   - Mavis tracks the demos-built-but-no-outreach count. Don't let it grow.
   - Mavis prefers fewer, better demos over many flawed ones.
