@@ -8,6 +8,7 @@
 
 import { parseArgs } from "node:util";
 import { spawnSync } from "node:child_process";
+import { readdirSync, existsSync, statSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,7 +26,26 @@ try {
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, "..", "..");
+
+// Locate a sibling skill's run.mjs. Skills are installed under
+// `<root>/__catalog__/<name>--<hash>/run.mjs`, so resolve by scanning the
+// parent catalog for an entry that matches the skill name (with or without
+// the `--<hash>` suffix). Falls back to `<root>/skills/<name>/run.mjs` for
+// dev layouts where skills live as plain directories.
+function resolveSiblingSkill(name) {
+  const catalogDir = dirname(here);
+  if (existsSync(catalogDir) && statSync(catalogDir).isDirectory()) {
+    const entries = readdirSync(catalogDir);
+    const match = entries.find((d) => d === name || d.startsWith(`${name}--`));
+    if (match) {
+      const p = resolve(catalogDir, match, "run.mjs");
+      if (existsSync(p)) return p;
+    }
+  }
+  const devPath = resolve(here, "..", "..", "skills", name, "run.mjs");
+  if (existsSync(devPath)) return devPath;
+  throw new Error(`sibling skill not found: ${name} (searched ${catalogDir} and ${devPath})`);
+}
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS leads (
@@ -100,9 +120,12 @@ function deltaPct(actual, avg) {
 }
 
 async function postDigest(payload) {
+  let scriptPath;
+  try { scriptPath = resolveSiblingSkill("board-notify"); }
+  catch (e) { return { status: "error", reason: "board_notify_not_found", message: e.message }; }
   const proc = spawnSync(
     "node",
-    [resolve(repoRoot, "skills", "board-notify", "run.mjs")],
+    [scriptPath],
     { input: JSON.stringify(payload), encoding: "utf8" }
   );
   if (proc.status !== 0) return { status: "error", stderr: proc.stderr };
