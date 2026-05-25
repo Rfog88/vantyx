@@ -7,3 +7,4 @@ escalate-to-board
 board-notify
 load-brand
 brand-consistency-check
+notify-cmo-sdr
