@@ -20,6 +20,10 @@ Phase 1.5: previews go to auto-generated Vercel subdomains
 (`preview-<slug>-<hash>.vercel.app`). Phase 2: migrate to
 `*.preview.vantyx.com` once custom-domain wildcard is wired.
 
+Project selection is deterministic: deploys target `preview-<slug>` for the
+current lead slug. Before deploy, the skill best-effort deletes retired
+hash-named legacy projects for the same slug.
+
 ## When to use
 
 - `demo-gen` heartbeat, step 4 — after `template-fill`.
@@ -35,7 +39,7 @@ Phase 1.5: previews go to auto-generated Vercel subdomains
 {
   "clone-path": "/tmp/demos/acme-electric",
   "lead-slug": "acme-electric",
-  "scope": "vantyx"           // optional; defaults to env VERCEL_SCOPE or "vantyx"
+  "scope": "rfog88s-projects" // optional; defaults to env VERCEL_SCOPE or "rfog88s-projects"
 }
 ```
 
@@ -63,3 +67,4 @@ Phase 1.5: previews go to auto-generated Vercel subdomains
 - `vercel` CLI installed under the `paperclip` system user
   (`npm install -g vercel` if not already).
 - `VERCEL_TOKEN` bound at agent or project env level in Paperclip Secrets.
+- Uses deterministic project names (`preview-<slug>`) to prevent project drift.
