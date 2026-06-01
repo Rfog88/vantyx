@@ -33,6 +33,7 @@ quickly scan deploys.
 
 ```json
 {
+  "lead-id": "63b7ca1b0e4a4d6c395f34dcd5d587d6",
   "lead-name": "Collier Electric",
   "demo-url": "https://preview-collier-electric-abc.vercel.app",
   "score": 75,
@@ -44,8 +45,16 @@ quickly scan deploys.
 ## Outputs
 
 ```json
-{ "posted": true, "channel": "discord-default" }
+{
+  "posted": true,
+  "channel": "discord-default",
+  "lead_update": { "updated": true, "fields_set": ["stage", "outreach_sent_at"] }
+}
 ```
+
+On success this skill persists the lead lifecycle transition by invoking
+`lead-update` with `stage='outreach_sent'`, which also stamps
+`outreach_sent_at`.
 
 ## Failure modes
 

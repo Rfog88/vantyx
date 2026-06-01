@@ -42,17 +42,18 @@ async function main() {
   }
 
   const leadName = input["lead-name"] || input.lead_name;
+  const leadId = input["lead-id"] || input.lead_id;
   const demoUrl = input["demo-url"] || input.demo_url;
   const score = input.score;
   const niche = input.niche;
   const city = input.city;
 
-  if (!leadName || !demoUrl || score == null) {
+  if (!leadName || !leadId || !demoUrl || score == null) {
     console.error(JSON.stringify({
       error: "decision-needed",
       reason: "missing required field(s)",
-      required: ["lead-name", "demo-url", "score"],
-      got: { leadName, demoUrl, score },
+      required: ["lead-id", "lead-name", "demo-url", "score"],
+      got: { leadId, leadName, demoUrl, score },
     }));
     process.exit(2);
   }
@@ -101,7 +102,38 @@ async function main() {
   let bn;
   try { bn = JSON.parse(proc.stdout || "{}"); } catch { bn = { raw: proc.stdout }; }
 
-  console.log(JSON.stringify({ posted: true, channel: "discord-default", board_notify: bn }));
+  let leadUpdatePath;
+  try { leadUpdatePath = resolveSiblingSkill("lead-update"); }
+  catch (e) {
+    console.error(JSON.stringify({
+      error: "adapter-broken",
+      service: "lead-update",
+      reason: "lead_update_not_found",
+      message: e.message,
+    }));
+    process.exit(5);
+  }
+
+  const leadUpdate = spawnSync(
+    "node",
+    [leadUpdatePath, "--lead-id", leadId, "--stage", "outreach_sent"],
+    { encoding: "utf8" }
+  );
+
+  if (leadUpdate.status !== 0) {
+    console.error(JSON.stringify({
+      error: "adapter-broken",
+      service: "lead-update",
+      stderr_tail: (leadUpdate.stderr || "").split("\n").slice(-5).join("\n"),
+      stdout_tail: (leadUpdate.stdout || "").split("\n").slice(-5).join("\n"),
+    }));
+    process.exit(5);
+  }
+
+  let lu;
+  try { lu = JSON.parse(leadUpdate.stdout || "{}"); } catch { lu = { raw: leadUpdate.stdout }; }
+
+  console.log(JSON.stringify({ posted: true, channel: "discord-default", board_notify: bn, lead_update: lu }));
 }
 
 main().catch((e) => {
