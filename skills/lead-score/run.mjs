@@ -23,7 +23,17 @@ try {
 }
 
 const TARGET_METROS = new Set([
+  // OH
   "lima", "findlay", "toledo", "columbus", "dayton",
+  // FL — Tampa-St. Pete
+  "tampa", "st. petersburg", "st petersburg", "saint petersburg",
+  "clearwater", "brandon", "wesley chapel",
+  // FL — Miami-Dade / Broward
+  "miami", "hialeah", "fort lauderdale", "hollywood", "pompano beach",
+  // FL — Orlando
+  "orlando", "kissimmee", "sanford",
+  // FL — Jacksonville
+  "jacksonville",
 ]);
 
 const LOCAL_AREA_CODES = new Set([

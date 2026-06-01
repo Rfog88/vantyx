@@ -50,9 +50,23 @@ calculation. Demo threshold: ≥65.
 | GBP rating 4.0+ AND review_count ≥ 20           | +25    |
 | Lighthouse mobile <50 OR no website             | +20    |
 | Niche match (electrician/plumber/hvac/roofer/gc)| +15    |
-| Target metro (Lima/Findlay/Toledo/Columbus/Dayton)| +10  |
+| Target metro (see list below)                   | +10    |
 | Site copyright <2022 OR no SSL                  | +15    |
 | Local area code in phone                        | +10    |
 | Review velocity ≥1/mo (review_count / months)   | +5     |
 
 Cap: 100. Demo build threshold: ≥65.
+
+### Target-metro list (committed territories)
+
+Match is case-insensitive on the lead's `city` column.
+
+- **OH**: Lima, Findlay, Toledo, Columbus, Dayton
+- **FL — Tampa-St. Pete**: Tampa, St. Petersburg, Clearwater, Brandon, Wesley Chapel
+- **FL — Miami-Dade / Broward**: Miami, Hialeah, Fort Lauderdale, Hollywood, Pompano Beach
+- **FL — Orlando**: Orlando, Kissimmee, Sanford
+- **FL — Jacksonville**: Jacksonville
+
+Additive list of "committed territories" only — CMO authority per AGENTS.md.
+Phase 2 will revisit as data-driven per-territory weighting once we have ≥3
+booked-call data points per territory.
