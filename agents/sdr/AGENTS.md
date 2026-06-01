@@ -66,3 +66,20 @@ Do NOT escalate for:
 ≥20 scored leads per scrape batch, ≥8 of them at score ≥65, under $5
 SerpAPI spend per batch. Read the latest `shared/playbooks/<niche>.md` files
 before scraping a new niche — CMO's playbook tells you what to look for.
+
+## Reply handling (hybrid mode)
+
+On each heartbeat (driven by the `sami-inbox-poll` routine — sub-issue F):
+1. `gmail-check-inbox` since the last-checked timestamp.
+2. For each new message:
+   - Match to outreach by `thread_id` against existing `outreach_sent_at` lead records.
+   - **No match** -> cold inbound. File a Tier-1 "unsolicited prospect contact" issue assigned to CMO; do NOT auto-respond.
+   - **Match** -> call `classify-outreach-reply`. Route by classification:
+     - `positive` -> call `photo-collection-followup`. Log lead: `reply_status=positive`, `replied_at=now`.
+     - `negative` -> log `reply_status=negative`, `replied_at=now`, mark lead `closed_no_interest`. No reply sent.
+     - `unsubscribe` -> log `reply_status=unsubscribed`, `replied_at=now`, mark lead `closed_unsubscribed`, add to the suppression list. No reply sent.
+     - `ambiguous` -> file a Tier-1 Board approval issue with the message body, classifier evidence, and 3 candidate response drafts. Board decides the response.
+
+References:
+- `feedback_progressive_automation_gate.md`
+- `feedback_paperclip_escalation.md`
