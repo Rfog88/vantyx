@@ -61,6 +61,10 @@ async function main() {
     sets.push("stage = ?");
     params.push(values.stage);
     fieldsSet.push("stage");
+    if (values.stage === "outreach_sent") {
+      sets.push("outreach_sent_at = datetime('now')");
+      fieldsSet.push("outreach_sent_at");
+    }
   }
 
   if (values["demo-url"]) {
@@ -83,6 +87,25 @@ async function main() {
   if (sets.length === 0) {
     console.error(JSON.stringify({ error: "decision-needed", reason: "no update fields provided" }));
     process.exit(2);
+  }
+
+  // Terminal-stage guard: refuse to downgrade a shipped lead back to demo_built.
+  // Protects against cross-day re-runs re-processing outreach_sent leads (VAN-394).
+  const TERMINAL_STAGES = new Set(["outreach_sent", "outreach_failed", "replied", "booked", "won", "lost"]);
+  if (values.stage === "demo_built" || values.stage === "new") {
+    const db = openDb();
+    const currentRow = db.prepare("SELECT stage FROM leads WHERE id = ?").get(leadId);
+    db.close();
+    if (currentRow && TERMINAL_STAGES.has(String(currentRow.stage || "").trim().toLowerCase())) {
+      console.error(JSON.stringify({
+        error: "terminal-stage-guard",
+        current_stage: currentRow.stage,
+        attempted_stage: values.stage,
+        lead_id: leadId,
+        message: "Refusing to downgrade terminal stage — lead already shipped.",
+      }));
+      process.exit(2);
+    }
   }
 
   sets.push("updated_at = datetime('now')");
