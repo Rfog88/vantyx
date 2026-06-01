@@ -32,6 +32,11 @@ where 0 = perfect match and 100 = totally drifted.
 
 ## Inputs
 
+`preview_url` must be the canonical deployment URL from `leads.demo_url`
+(the gate issue `preview-url:` value), typically the hash URL like
+`preview-<slug>-<hash>-<scope>.vercel.app`. Bare aliases like
+`preview-<slug>.vercel.app` are rejected.
+
 ```json
 {
   "client_slug": "acme-electric",
@@ -44,8 +49,26 @@ where 0 = perfect match and 100 = totally drifted.
 
 ```json
 {
+  "preview_url": "https://preview-acme-electric-abcd1234.vercel.app/",
   "drift_score": 8,
+  "palette_drift": 4,
+  "checklist_passed": "7/7",
   "passes_threshold": true,
+  "subIssueChecks": {
+    "slots_present":        { "passed": true,  "evidence": "data-placeholder-slot count = 3; data-trust-slot count = 5" },
+    "geo_city_consistency": { "passed": true,  "evidence": "JSON-LD geo.latitude=27.9506 resolves to Tampa FL (0.1 mi); address.addressLocality=Tampa" },
+    "no_unsplash":          { "passed": true,  "evidence": "0 unsplash.com refs in rendered HTML" },
+    "brand_chrome_present": { "passed": true,  "evidence": "sticky nav present; footer badge block present; trust strip 5-item" },
+    "payload_fidelity":     { "passed": true,  "evidence": "phone, license_no, city all agree with rendered HTML" },
+    "license_render":       {
+      "passed": true,
+      "case": "placeholder_lead",
+      "evidence": "placeholder_lead: license slot rendered correctly; no raw placeholders.",
+      "license_no_raw_placeholder": { "passed": true, "evidence": "no raw x{4,}/0{4,} substrings in rendered HTML" },
+      "license_field_render":       { "passed": true, "case": "placeholder_lead", "evidence": "placeholder_lead: \"License verification pending\" + data-placeholder-slot=\"license\" + aria-label=\"License pending — concept demo\" all present." }
+    }
+  },
+  "subIssueFailures": [],
   "findings": [
     "OK: license # in hero",
     "OK: tap-to-call header",
@@ -54,6 +77,36 @@ where 0 = perfect match and 100 = totally drifted.
   ]
 }
 ```
+
+### `subIssueChecks` contract (consumer rules for demo-gen)
+
+VAN-124 surfaces per-sub-issue family pass/fail alongside the aggregate
+`drift_score`. Demo-gen MUST use this block — not just `drift_score` — when
+composing REJECT reasons so Cipher can route the right reconciliation issue.
+
+| Family | What it greps in deployed HTML |
+|---|---|
+| `slots_present`        | `data-placeholder-slot` + `data-trust-slot` count > 0 (mirrors Class E `slots_absent` pre-check). |
+| `geo_city_consistency` | LocalBusiness JSON-LD `geo.latitude`/`geo.longitude` reverse-geocodes to a locality that matches `address.addressLocality`, and must remain coherent with Class E ZIP-centroid checks (notably Tampa ZIP set including `33635`). |
+| `no_unsplash`          | Zero `images.unsplash.com` / `source.unsplash.com` / `plus.unsplash.com` refs in user-visible HTML. Detects both plain and `_next/image?url=...`-encoded forms. |
+| `brand_chrome_present` | Sticky `<header>`/`<nav>` + `<footer>` badge block + ≥3-item trust strip. |
+| `payload_fidelity`     | site.config.ts `contact.phone`, `business.licenseNumber`, `contact.address.city`, and any `gallery[].src` URLs appear in rendered HTML. Placeholder license_no (`xxxxxxxx`) is skipped here — see `license_render` for the labeled-pending check. |
+| `license_render`       | VAN-131 / Board policy 06e8edd9. Two assertions: (a) `license_no_raw_placeholder` — no `x{4,}` or `0{4,}` substring anywhere in rendered HTML; (b) `license_field_render` — placeholder leads render literal `License verification pending` + `data-placeholder-slot="license"` + concept-demo aria-label; verified leads render the real value and must NOT contain the pending label. Per-case pass/fail (`placeholder_lead` / `verified_lead`) surfaced alongside the family's `passed` boolean for mechanical VAN-96 sub-issue closure. Supersedes the prior VAN-66 auto-suppression path. |
+
+Each entry shape:
+```json
+{ "passed": true|false, "evidence": "human-readable string" }
+```
+
+`passes_threshold` is `true` only when `drift_score ≤ 15` AND every
+`subIssueChecks` entry is `passed: true`. Any red family also lands in the
+flat `subIssueFailures` array (`[{ family, evidence }]`) and is appended to
+`findings` at `level: "fail"` so demo-gen's REJECT comment can name the
+specific family that regressed instead of a generic drift score.
+
+When the preview is unreachable (HTTP error, timeout), every family is
+emitted as `{ passed: false, evidence: "preview unreachable: <reason>" }`
+and `passes_threshold` is `false`.
 
 ## Drift dimensions checked
 
