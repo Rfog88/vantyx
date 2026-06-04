@@ -3,6 +3,8 @@
 //
 // Invocation:
 //   node skills/lead-update/run.mjs --lead-id <uuid> [--stage demo_built] [--demo-url https://...] [--score 78]
+//   node skills/lead-update/run.mjs --lead-id <uuid> --review-posted   # stamp review_posted_at = now
+//   node skills/lead-update/run.mjs --lead-id <uuid> --board-approved  # stamp board_approved_at = now
 
 import { parseArgs } from "node:util";
 
@@ -35,6 +37,8 @@ async function main() {
       stage: { type: "string" },
       "demo-url": { type: "string" },
       score: { type: "string" },
+      "review-posted": { type: "boolean" },
+      "board-approved": { type: "boolean" },
     },
   });
 
@@ -82,6 +86,16 @@ async function main() {
     sets.push("score = ?");
     params.push(s);
     fieldsSet.push("score");
+  }
+
+  if (values["review-posted"]) {
+    sets.push("review_posted_at = datetime('now')");
+    fieldsSet.push("review_posted_at");
+  }
+
+  if (values["board-approved"]) {
+    sets.push("board_approved_at = datetime('now')");
+    fieldsSet.push("board_approved_at");
   }
 
   if (sets.length === 0) {

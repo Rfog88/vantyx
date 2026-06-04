@@ -142,28 +142,41 @@ async function main() {
     console.error(JSON.stringify({ error: "decision-needed", reason: "clone-path missing or not a directory", clonePath }));
     process.exit(2);
   }
-  // SALVAGE: block deploys when template-fill was not run (seed fixture still present).
-  try {
-    const cfg = readFileSync(join(clonePath, "site.config.ts"), "utf8");
-    const looksLikeFixture =
-      /["']?city["']?\s*:\s*["']Lima["']/.test(cfg) &&
-      /["']?licenseNumber["']?\s*:\s*["']EL\.45801["']/.test(cfg);
-    if (looksLikeFixture) {
+  // Deployability check. A Lovable export is a static/Vite app — require either a
+  // package.json with a `build` script (Vite/React) or a bare index.html. This
+  // replaces the retired site.config.ts fixture guard: the in-house vantyx-web-os
+  // template is gone, and a Lovable app has no site.config.ts, so the old guard
+  // blocked every deploy. We still refuse to deploy an empty/garbage directory.
+  {
+    const pkgPath = join(clonePath, "package.json");
+    const indexPath = join(clonePath, "index.html");
+    let deployable = false;
+    let detail = "";
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+        if (pkg?.scripts && typeof pkg.scripts.build === "string" && pkg.scripts.build.trim()) {
+          deployable = true;
+        } else {
+          detail = "package.json present but has no build script";
+        }
+      } catch (e) {
+        detail = `package.json unparseable: ${e.message}`;
+      }
+    } else if (existsSync(indexPath)) {
+      deployable = true;
+    } else {
+      detail = "no package.json (with build script) or index.html found";
+    }
+    if (!deployable) {
       console.error(JSON.stringify({
         error: "decision-needed",
-        reason: "seed fixture detected in site.config.ts",
-        detail: "Found city: Lima and licenseNumber: EL.45801. Run template-fill before deploying.",
+        reason: "clone-path is not a deployable static/Vite app",
+        detail,
+        clonePath,
       }));
       process.exit(2);
     }
-  } catch (e) {
-    console.error(JSON.stringify({
-      error: "decision-needed",
-      reason: "site.config.ts unreadable or missing",
-      detail: e.message,
-      clonePath,
-    }));
-    process.exit(2);
   }
 
   const token = process.env.VERCEL_TOKEN;

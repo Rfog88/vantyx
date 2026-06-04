@@ -36,11 +36,18 @@ to prevent accidental schema changes.
   "lead-id": "<uuid>",
   "stage": "demo_built",          // optional
   "demo-url": "https://...",       // optional
-  "score": 78                       // optional (rescore path)
+  "score": 78,                      // optional (rescore path)
+  "review-posted": true,            // optional flag — stamp review_posted_at = now
+  "board-approved": true            // optional flag — stamp board_approved_at = now
 }
 ```
 
-At least one of the optional fields must be provided.
+At least one of the optional fields/flags must be provided.
+
+- `--review-posted` — set by the `morning-demo-review` routine when a demo is
+  posted to Discord for Board review (so it isn't reposted next morning).
+- `--board-approved` — set by the SDR when Ryan approves the demo and outreach
+  fires (usually together with `--stage outreach_sent`).
 
 ## Outputs
 

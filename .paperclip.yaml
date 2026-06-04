@@ -111,9 +111,11 @@ routines:
       Paperclip UI after diagnosis.
 
   # ---------------------------------------------------------------
-  # demo-build-watcher — every 15 min (Phase 1.5).
-  # demo-gen polls SQLite for stage='new' AND score>=65, runs the full
-  # demo pipeline. Caps at 3/cycle for Vercel quota.
+  # demo-build-watcher — every 15 min.
+  # demo-gen polls SQLite for stage='new' AND score>=65 and builds a demo with
+  # the Lovable MCP (deploy_project → <slug>.lovable.app, served branded under
+  # <slug>.usevantyx.com). It STOPS at stage='demo_built' — it does NOT send
+  # outreach. Caps at 3/cycle for build-cost control.
   #
   # NOTE: routines are NOT imported by companies.sh — Ryan must create this
   # in the Paperclip UI (Routines → + Create routine) using the values below.
@@ -129,25 +131,73 @@ routines:
     catchUpPolicy: skip-missed
     title: "Demo-build watcher (15-min)"
     prompt: |
-      Run your HEARTBEAT.md step 2 — process the demo-build pipeline.
+      Run your HEARTBEAT.md step 2 — build demos with Lovable.
 
       Query SQLite: SELECT id, name, website, niche, city, state, zip, score
       FROM leads WHERE stage='new' AND score>=65
       ORDER BY score DESC LIMIT 3.
 
-      For each lead:
-        1. Check shared/brand/clients/<slug>.md
-           - If missing: brand-extract + @ux-designer mention, then skip.
-           - If present: continue.
-        2. template-clone → /tmp/demos/<slug>
-        3. template-fill (uses lead row + brand file)
-        4. vercel-deploy → captures URL
-        5. lead-update (stage='demo_built', demo_url=<url>)
-        6. notify-cmo-sdr Tier 0
+      For each lead (skip any whose live stage is no longer 'new'):
+        1. prompt-fill → /tmp/demos/<slug>/lovable-prompt.txt
+        2. Lovable MCP: create_project(name=<slug>, prompt) → set_project_visibility
+           public → deploy_project. Published at https://<slug>.lovable.app
+           (name MUST equal slug so the branded URL is deterministic).
+        3. Branded link = https://<slug>.usevantyx.com (Cloudflare proxy).
+        4. lead-update → stage='demo_built', demo_url=https://<slug>.usevantyx.com
+        5. demo-smoke-check on the branded URL → on pass, leave at demo_built
+           (awaiting Ryan's morning review); on fail, comment findings and skip.
 
-      Cap 3 per cycle (Vercel quota guard).
-      On any error: diagnose-why-work-stopped, then comment + escalate per
-      your AGENTS.md rules.
+      Do NOT send outreach and do NOT call notify-cmo-sdr — Ryan approves each
+      demo in the Paperclip UI first (see morning-demo-review).
+
+      Cap 3 per cycle. On any error: diagnose-why-work-stopped, then comment +
+      escalate per your AGENTS.md rules.
+
+  # ---------------------------------------------------------------
+  # morning-demo-review — weekdays 7:00am ET.
+  # Posts the top 3 unreviewed demos to Discord #vantyx-ops for Ryan (Board) to
+  # review by clicking the links, and opens a Tier-1 Board approval Issue per
+  # demo. Ryan approves in the Paperclip UI; approval is what triggers outreach
+  # (handled by the SDR). This is the human quality gate.
+  #
+  # NOTE: create this in the Paperclip UI like the others.
+  # ---------------------------------------------------------------
+  morning-demo-review:
+    triggers:
+      - kind: schedule
+        cronExpression: "0 7 * * 1-5"          # 07:00 America/New_York, Mon–Fri
+        timezone: America/New_York
+    assigneeAgentSlug: cmo
+    concurrencyPolicy: skip
+    catchUpPolicy: skip-missed
+    title: "Morning demo review (7am)"
+    prompt: |
+      Surface the best unreviewed demos for Board approval.
+
+      Query SQLite:
+        SELECT id, name, niche, city, state, score, demo_url
+        FROM leads
+        WHERE stage='demo_built' AND demo_url IS NOT NULL
+              AND review_posted_at IS NULL
+        ORDER BY score DESC LIMIT 3.
+
+      For each demo:
+        1. Post to Discord #vantyx-ops via board-notify Tier 1 — one message per
+           demo with: company name, city/state, niche, score, and the clickable
+           demo_url. Keep it plain: "Demo ready to review — <name> (<city>,
+           <state>) · <niche> · score <score> · <demo_url>".
+        2. Open a Board approval Issue (escalate-to-board Tier 1, reason
+           `decision-needed`) titled "Approve demo: <name>" whose body has the
+           demo_url and lead-id, so Ryan can approve/reject in the Paperclip UI.
+        3. Mark the lead reviewed so it isn't reposted:
+           lead-update --lead-id <id> --review-posted
+
+      If fewer than 3 demos are ready, post what's available and add one comment
+      on this Issue: "Only N demos ready for review this morning (backlog low)."
+      If zero are ready, comment "No demos awaiting review." and stop.
+
+      Do NOT send outreach here. Outreach fires only after Ryan approves a demo's
+      Issue — the SDR owns that step.
 
 # ---------------------------------------------------------------
 # Project Env defaults (overrides agent env on matching keys).
@@ -160,6 +210,10 @@ projectEnv:
   # BOARD_DND_HOURS:     { type: literal, value: "22-07" }
   # PAPERCLIP_API_URL:   { type: literal, value: "http://localhost:3100" }
   # PAPERCLIP_API_TOKEN: { type: secret, source: PAPERCLIP_API_TOKEN }
+
+  # Demo build (demo-gen): the Lovable MCP (https://mcp.lovable.dev) authenticates
+  # via OAuth at the Claude Code layer on the droplet (not a Paperclip secret).
+  # See infra/cloudflare/ for the usevantyx.com demo proxy.
 
   # Tier-2 SMS (optional):
   # TWILIO_AUTH_TOKEN:   { type: secret, source: TWILIO_AUTH_TOKEN }
