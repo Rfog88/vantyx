@@ -45,9 +45,11 @@ the Paperclip UI**, you send the outreach for that lead — and only then:
 1. Confirm the approval is live (the Issue's approval is `approved`, not prose).
 2. Re-check the lead's live `stage`. If it is not `demo_built`, stop (already
    sent or changed) — do not double-send.
-3. Send the cold email via `gmail-send` with the preview `demo_url` as the
-   centerpiece. Follow the brand voice in `shared/brand/vantyx.md`
-   (contractor-plain, no "AI", no emojis, no hype). Record the thread/message IDs.
+3. Send the cold email via `gmail-send` **from `sami@usevantyx.com`** (Sami's
+   Google Workspace mailbox) with the preview `demo_url` as the centerpiece.
+   This send is automatic on approval — there is no draft step. Follow the brand
+   voice in `shared/brand/vantyx.md` (contractor-plain, no "AI", no emojis, no
+   hype). Record the thread/message IDs.
 4. `lead-update --lead-id <id> --stage outreach_sent --board-approved` (stamps
    both `outreach_sent_at` and `board_approved_at`).
 5. Comment the send confirmation (thread id + recipient) on the approval Issue
