@@ -136,6 +136,27 @@ Notes:
 - The send path (`pending-approved-outreach`) already re-checks suppression before any
   send, so a freshly-suppressed address is safe even mid-batch.
 
+## Follow-up drip (PATH 2 / PATH 4) — build #3
+
+Driven by the `drip-schedule` routine (trigger DISABLED until warm-up, build #5). When
+it fires:
+
+1. Run `drip-claim` (it applies every guard — suppression, daily cap, send-window,
+   lifetime ceiling, compliance — and ATOMICALLY claims each due step). It returns
+   `claimed[]`; if `blocked` is set (`compliance`/`send-window`) there is nothing to do.
+2. For each `claimed` item, send the email **verbatim** via `gmail-send` from
+   `sami@usevantyx.com` as a reply on the original thread: use `threadId` and
+   `In-Reply-To: inReplyTo`, subject and body exactly as returned. Do NOT rewrite the
+   copy — it is compliance-checked (footer carries the physical address + opt-out).
+3. The step is already claimed/advanced by `drip-claim`; you do NOT call `lead-update`
+   for it. If a `gmail-send` fails, log it — the lead simply under-sends (safe); do not
+   retry blindly within the same fire.
+
+Hard rules: never compose your own follow-up copy; never send outside what `drip-claim`
+returns; a reply/suppression mid-sequence is already handled (it removes the lead from
+the next claim). Templates + cadence live in `drip-claim` and `VANTYX-OUTREACH-SEQUENCE.md`.
+Before enabling: `DRIP_POSTAL_ADDRESS` must be set (the engine refuses to send without it).
+
 References:
 - `VANTYX-OUTREACH-SEQUENCE.md` (approved build spec — paths, templates, gates)
 - `feedback_progressive_automation_gate.md`
