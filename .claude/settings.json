@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/bootstrap.sh\" load"
+            "command": "bash -c 'for d in \"$CLAUDE_PROJECT_DIR\" \"$PWD\" /home/user/vantyx; do [ -f \"$d/.claude/hooks/bootstrap.sh\" ] && exec bash \"$d/.claude/hooks/bootstrap.sh\" load; done'"
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/bootstrap.sh\" save"
+            "command": "bash -c 'for d in \"$CLAUDE_PROJECT_DIR\" \"$PWD\" /home/user/vantyx; do [ -f \"$d/.claude/hooks/bootstrap.sh\" ] && exec bash \"$d/.claude/hooks/bootstrap.sh\" save; done'"
           }
         ]
       }
