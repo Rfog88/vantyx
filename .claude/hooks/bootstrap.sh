@@ -12,7 +12,7 @@
 # Usage (from .claude/settings.json):  bootstrap.sh load   |   bootstrap.sh save
 
 MODE="${1:-load}"
-BRANCH='claude/mcp-stack-setup-yQkp4'   # TODO Phase 1 completion: -> 'main'
+BRANCH='main'   # dotclaude default branch (Phase 1 merged to default)
 WANT='rfog88/dotclaude'
 NAME='dotclaude'
 

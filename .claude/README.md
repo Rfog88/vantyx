@@ -10,9 +10,9 @@ container with no `~/.claude`) auto-loads this project's memory from the
   it exits immediately — local machines use their own `~/.claude` hooks, so there is no
   double-loading and nothing here runs on your home/work PC.
 
-**Status:** lives on branch `claude/mcp-stack-setup-yQkp4`. It only goes live once merged to
-the default branch — gated on the Phase 1 cross-machine hard test passing, the same green
-light as the dotclaude merge. Do not merge to `master` before then.
+**Status:** merged to the default branch (`master`) as of Phase 1 completion — the
+cross-machine hard test passed (the same green light as the dotclaude merge), so the shim
+is live.
 
 **Web prerequisites:** `Rfog88/claude-memory` and `Rfog88/dotclaude` must both be in the web
 session's repository scope (the shim clones dotclaude for the shared hooks; the shared loader
