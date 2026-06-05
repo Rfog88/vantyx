@@ -1,0 +1,3 @@
+# The web shim's shell script must stay LF so the Linux container's bash can run it
+# (a CRLF in the shebang line breaks `#!/usr/bin/env bash`).
+*.sh text eol=lf
