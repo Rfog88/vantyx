@@ -19,7 +19,21 @@ NAME='dotclaude'
 # Only the web needs bootstrapping; local machines already have the shared hooks.
 [ -z "$CLAUDE_CODE_REMOTE" ] && exit 0
 
-normalize() { local r="$1"; r="${r#git@*:}"; r="${r#ssh://*/}"; r="${r#https://*/}"; r="${r#http://*/}"; r="${r%.git}"; printf '%s' "$r" | tr '[:upper:]' '[:lower:]'; }
+# Canonicalize any remote URL to owner/repo (the last two path segments), lowercased.
+# Robust to proxy path prefixes of ANY depth (e.g. .../git/owner/repo), scp-style
+# git@host:owner/repo, ssh://, and a trailing .git -- not just today's '/git/' prefix.
+normalize() {
+  local r="$1"
+  r="${r#*://}"          # strip scheme://  (no-op for scp-style git@host:...)
+  r="${r%/}"             # strip a trailing slash
+  r="${r%.git}"          # strip a trailing .git
+  r="${r//:/\/}"         # scp-style / userinfo / port colons -> '/'
+  local repo rest owner
+  repo="${r##*/}"        # last path segment        = repo
+  rest="${r%/*}"         # everything before it
+  owner="${rest##*/}"    # last segment of the rest = owner
+  printf '%s/%s' "$owner" "$repo" | tr '[:upper:]' '[:lower:]'
+}
 remote_matches() { local d="$1" w="$2" r; r="$(git -C "$d" remote get-url origin 2>/dev/null)" || return 1; [ "$(normalize "$r")" = "$w" ]; }
 discover_checkout() {
   local want="$1" name="$2" pj="$3" c base
