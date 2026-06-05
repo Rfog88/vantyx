@@ -38,7 +38,9 @@ to prevent accidental schema changes.
   "demo-url": "https://...",       // optional
   "score": 78,                      // optional (rescore path)
   "review-posted": true,            // optional flag — stamp review_posted_at = now
-  "board-approved": true            // optional flag — stamp board_approved_at = now
+  "board-approved": true,           // optional flag — stamp board_approved_at = now
+  "reply-status": "positive",       // optional — reply classification (build #2)
+  "replied": true                   // optional flag — stamp replied_at = now
 }
 ```
 
@@ -48,6 +50,14 @@ At least one of the optional fields/flags must be provided.
   posted to Discord for Board review (so it isn't reposted next morning).
 - `--board-approved` — set by the SDR when Ryan approves the demo and outreach
   fires (usually together with `--stage outreach_sent`).
+- `--reply-status` — set by the SDR reply loop from `classify-outreach-reply`.
+  One of: `positive | negative | changes | ambiguous | unsubscribed | bounced |
+  soft_bounce | complaint | auto_reply`.
+- `--replied` — stamp `replied_at = now` when an inbound reply/bounce is processed.
+
+Stages accepted: `new, demo_built, outreach_sent, replied, qualifying,
+closed_no_interest, closed_unsubscribed, booked, won, lost`. The terminal-stage
+guard refuses to downgrade an already-shipped/closed lead back to `demo_built`/`new`.
 
 ## Outputs
 

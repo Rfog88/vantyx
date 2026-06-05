@@ -94,17 +94,49 @@ before scraping a new niche — CMO's playbook tells you what to look for.
 
 ## Reply handling (hybrid mode)
 
-On each heartbeat (driven by the `sami-inbox-poll` routine — sub-issue F):
-1. `gmail-check-inbox` since the last-checked timestamp.
+Implements the approved spec in `VANTYX-OUTREACH-SEQUENCE.md` (build #2). Driven by
+the `sami-inbox-poll` routine.
+
+**GLOBAL RULE — suppression is law.** Never email any address on the suppression
+list (`suppression-check`, or the inline check the send path runs). A "no", an
+unsubscribe, a hard bounce, or a spam complaint is permanent and applies even if the
+same business is re-scraped later as a fresh lead row.
+
+On each fire:
+1. `gmail-check-inbox` since the last-checked timestamp (SQLite dedup persists state).
 2. For each new message:
-   - Match to outreach by `thread_id` against existing `outreach_sent_at` lead records.
-   - **No match** -> cold inbound. File a Tier-1 "unsolicited prospect contact" issue assigned to CMO; do NOT auto-respond.
-   - **Match** -> call `classify-outreach-reply`. Route by classification:
-     - `positive` -> call `photo-collection-followup`. Log lead: `reply_status=positive`, `replied_at=now`.
-     - `negative` -> log `reply_status=negative`, `replied_at=now`, mark lead `closed_no_interest`. No reply sent.
-     - `unsubscribe` -> log `reply_status=unsubscribed`, `replied_at=now`, mark lead `closed_unsubscribed`, add to the suppression list. No reply sent.
-     - `ambiguous` -> file a Tier-1 Board approval issue with the message body, classifier evidence, and 3 candidate response drafts. Board decides the response.
+   - Match to outreach by `thread_id` against `outreach_sent_at` lead records.
+   - **No match** → cold inbound. File a Tier-1 "unsolicited prospect contact" issue
+     assigned to CMO; do NOT auto-respond.
+   - **Match** → call `classify-outreach-reply` with `--from --subject --body`
+     (`--body-file`/`--raw-file` for large or raw content), `--lead-id`,
+     `--lead-email` (the address we contacted — the canonical suppress target),
+     `--message-id`, and — only for a human reply that is NOT a bounce/complaint/
+     unsubscribe/auto-reply — your own semantic read via `--llm-class
+     yes|no|changes|ambiguous`. If unsure, omit it (defaults to `ambiguous` → Board).
+
+The classifier's deterministic detectors (bounce/complaint/unsubscribe) OVERRIDE any
+label you pass, and it AUTO-SUPPRESSES the reputation-critical classes itself — so the
+suppression write never depends on you remembering. Execute the returned decision:
+
+| `class` | What you do |
+|---|---|
+| `hard_bounce` | (already suppressed) `lead-update --reply-status bounced --replied --stage lost`. No send. |
+| `soft_bounce` | `lead-update --reply-status soft_bounce --replied`. NOT suppressed; leave the lead — cadence may retry. |
+| `complaint` | (already suppressed) `lead-update --reply-status complaint --replied --stage lost`. **High-priority Discord alert to Ryan** via `board-notify` (reputation event). No send. |
+| `unsubscribe` | (already suppressed) `lead-update --reply-status unsubscribed --replied --stage closed_unsubscribed`. No reply sent. |
+| `auto_reply` | Out-of-office / autoresponder — not a real reply. No state change, no suppression; leave any drip running. (Do NOT treat as positive.) |
+| `positive` (YES) | `lead-update --reply-status positive --replied --stage qualifying`. **AUTO-SEND IS OFF until Ryan turns on warm-up (build #5 go-live gate).** For now: do NOT send the auto-reply — fire a high-priority Discord alert to Ryan (`board-notify`: hot lead, he follows up personally today) and let him respond. The PATH 1 YES auto-reply template (from `sami@usevantyx.com`) and its auto-send wiring land with build #5; classifier already returns `send_auto_reply:true` so it's ready to flip on. |
+| `negative` (NO) | A "no" is a FULL STOP (decision #2; already suppressed as `no_interest`). `lead-update --reply-status negative --replied --stage closed_no_interest`. **No soft-no email.** |
+| `changes` | YES-BUT-WANTS-CHANGES — its own lane, do NOT bury in ambiguous. `lead-update --reply-status changes --replied --stage qualifying`. Capture the requested edits, alert Ryan (`board-notify`), and on his OK rebuild/redeploy the demo via Lovable, then re-engage. |
+| `ambiguous` | `lead-update --reply-status ambiguous --replied`. File a Tier-1 Board approval Issue (`board-approval-create`) with the message body, the classifier's `signals`, and 3 candidate response drafts. Board decides. |
+
+Notes:
+- Keep "AI" out of all client-facing copy; honest-concept framing only.
+- The send path (`pending-approved-outreach`) already re-checks suppression before any
+  send, so a freshly-suppressed address is safe even mid-batch.
 
 References:
+- `VANTYX-OUTREACH-SEQUENCE.md` (approved build spec — paths, templates, gates)
 - `feedback_progressive_automation_gate.md`
 - `feedback_paperclip_escalation.md`
