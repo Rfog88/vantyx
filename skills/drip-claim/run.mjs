@@ -80,24 +80,25 @@ function render(step, lead) {
   const trade = TRADE[lead.niche] || lead.niche || "contractor";
   const demo = lead.demo_url || "";
   const f = "\n\n" + footer();
-  // No confident first name yet (merge-field layer #4) → drop the salutation to "Hey".
+  // Confident first name → use it; else drop the salutation to "Hey" (spec decision #1).
+  const sal = (lead.first_name && String(lead.first_name).trim()) ? String(lead.first_name).trim() : "Hey";
   if (step === "day3") {
-    return `Hey — just making sure the link to your demo site landed. Here it is again: ${demo}\n\n` +
+    return `${sal} — just making sure the link to your demo site landed. Here it is again: ${demo}\n\n` +
       `It's built from what's already public about ${biz} — your reviews, services, the area you cover. Took about twenty minutes. Have a look when you get a minute and tell me what you think.\n\nSami${f}`;
   }
   if (step === "day7") {
-    return `Hey — figured it'd help to see a finished one. Here's a site we did for a ${trade} like you: ${PROOF_URL}\n\n` +
+    return `${sal} — figured it'd help to see a finished one. Here's a site we did for a ${trade} like you: ${PROOF_URL}\n\n` +
       `Yours (${demo}) is the same idea — already roughed out from your public info. The photos and a couple details are all that's left, about ten more minutes once you're in. Worth a quick look?\n\nSami${f}`;
   }
   if (step === "day14") {
     // probe_finding (merge-field layer #4) not available yet → omit the finding sentence (spec: only claim a finding if one exists).
     const finding = (lead.probe_finding || "").trim();
     const findingClause = finding ? ` Quick reason it's worth ten minutes: ${finding} — that's costing you calls from people who look you up before they dial.` : "";
-    return `Hey — last note from me on this. I know a website feels like one more thing when the phone's already ringing.${findingClause}\n\n` +
+    return `${sal} — last note from me on this. I know a website feels like one more thing when the phone's already ringing.${findingClause}\n\n` +
       `Your demo's still here if you want it: ${demo}. If now's not the time, no hard feelings — just reply and I'll close it out.\n\nSami${f}`;
   }
   // nurture
-  return `Hey — Sami with Vantyx, circling back after a while. No agenda — just seeing whether a new website has moved up your list since we last talked.\n\n` +
+  return `${sal} — Sami with Vantyx, circling back after a while. No agenda — just seeing whether a new website has moved up your list since we last talked.\n\n` +
     `If it has, I can refresh the concept we built for ${biz} in a day. If not, all good — I won't keep knocking.\n\nSami${f}`;
 }
 
@@ -136,15 +137,7 @@ async function main() {
     return;
   }
 
-  // Send window (global tz until per-lead tz in #4).
-  const win = windowOk(now, TZ);
-  if (!win.ok && !values["ignore-window"]) {
-    console.log(JSON.stringify({ claimed: [], count: 0, blocked: "send-window",
-      window: WINDOW, tz: TZ, local_weekday: win.weekday, local_hour: win.hour,
-      reason: "outside recipient-local send window (Mon-Fri morning only)" }));
-    return;
-  }
-
+  // Send window is checked PER LEAD against its own timezone (build #4) inside the loop.
   const db = new DatabaseSync(process.env.LEADS_DB_PATH || "/home/paperclip/vantyx-leads.sqlite");
 
   // Combined daily cap: cold + drip + nurture claimed today.
@@ -155,7 +148,7 @@ async function main() {
 
   // Eligible pool, oldest cold-send first.
   const pool = db.prepare(
-    `SELECT id,name,niche,city,state,email,demo_url,
+    `SELECT id,name,niche,city,state,email,demo_url,first_name,probe_finding,timezone,
             outreach_sent_at,outreach_thread_id,outreach_message_id,outreach_subject,
             reply_status,drip_step,nurture_count,last_drip_at,last_nurture_at
      FROM leads
@@ -171,13 +164,15 @@ async function main() {
 
   const claimNow = iso(now);
   const claimed = [];
-  const skipped = { not_due: 0, suppressed: 0, no_thread: 0, cap_reached: 0, race: 0 };
+  const skipped = { not_due: 0, suppressed: 0, no_thread: 0, out_of_window: 0, cap_reached: 0, race: 0 };
 
   for (const lead of pool) {
     if (remaining <= 0) { skipped.cap_reached++; continue; }
     const due = dueStep(lead, now);
     if (!due) { skipped.not_due++; continue; }
     if (!lead.outreach_thread_id || !lead.outreach_message_id) { skipped.no_thread++; continue; }
+    // Per-lead recipient-local send window (Mon-Fri morning), falling back to the global tz.
+    if (!values["ignore-window"] && !windowOk(now, lead.timezone || TZ).ok) { skipped.out_of_window++; continue; }
     try { if (isSuppressed(lead.email)) { skipped.suppressed++; continue; } } catch { /* table absent */ }
 
     const dedupKey = `drip:${lead.id}:${due.key}`;
@@ -216,7 +211,7 @@ async function main() {
 
   db.close();
   console.log(JSON.stringify({
-    now: claimNow, tz: TZ, window: WINDOW, window_ok: win.ok,
+    now: claimNow, default_tz: TZ, window: WINDOW, window_per_lead: true,
     cap, sent_today: sentToday, remaining_after: Math.max(0, remaining),
     postal_ok: !!POSTAL, dry_run: dry,
     count: claimed.length, claimed, skipped,

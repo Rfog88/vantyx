@@ -12,7 +12,7 @@ metadata:
     - DRIP_SAMI_PHONE          # optional footer phone
     - DRIP_UNSUBSCRIBE_LINK    # optional; else footer uses "reply stop" only
     - DRIP_PROOF_URL           # default https://fogleandsons.com (electrician proof)
-    - DRIP_TIMEZONE            # default America/New_York (global until per-lead tz, build #4)
+    - DRIP_TIMEZONE            # fallback tz when a lead has no `timezone` (build #4 sets it per-lead)
     - DRIP_WINDOW              # default "7-12" local hours
   implementation: skills/drip-claim/run.mjs
   primary_users: [sdr]
@@ -26,8 +26,10 @@ transports what this returns.
 
 ## Cadence (clocked off `outreach_sent_at`)
 - **Day 3** soft nudge · **Day 7** proof (`DRIP_PROOF_URL`) · **Day 14** objection
-  (probe_finding clause omitted until build #4 adds it). Then **nurture** every ~90
-  days, max 2. Lifetime ceiling = 1 cold + 3 drip + 2 nurture = 6.
+  (includes the lead's real `probe_finding` if one exists; omitted otherwise). Then
+  **nurture** every ~90 days, max 2. Lifetime ceiling = 1 cold + 3 drip + 2 nurture = 6.
+  Salutation uses the lead's confident `first_name` when set, else drops to "Hey".
+  The send window is checked against each lead's own `timezone` (build #4).
 
 ## Guards (a claim passes ALL)
 - Eligible: `stage='outreach_sent'` AND `reply_status IN (NULL,'soft_bounce')` — any
