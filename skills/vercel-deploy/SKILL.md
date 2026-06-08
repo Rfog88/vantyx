@@ -2,7 +2,7 @@
 schema: agentcompanies/v1
 kind: skill
 name: vercel-deploy
-description: Run `vercel --prod` from a static/Vite app exported by lovable-build, capture the deployed URL, return it for the lead-update step.
+description: Run `vercel --prod` from a filled Vantyx Web OS clone, capture the deployed URL, return it for the lead-update step.
 metadata:
   requires_env:
     - VERCEL_TOKEN
@@ -13,10 +13,8 @@ metadata:
 
 # vercel-deploy
 
-Wrap the Vercel CLI for a production deploy of a per-lead static/Vite app that
-`lovable-build` exported into `/tmp/demos/<slug>`. Vercel auto-detects the Vite
-framework (build `npm run build`, output `dist`). Returns the canonical
-`*.vercel.app` URL.
+Wrap the Vercel CLI for a production deploy of a per-lead clone of Vantyx
+Web OS. Returns the canonical `*.vercel.app` URL.
 
 Phase 1.5: previews go to auto-generated Vercel subdomains
 (`preview-<slug>-<hash>.vercel.app`). Phase 2: migrate to
@@ -26,13 +24,9 @@ Project selection is deterministic: deploys target `preview-<slug>` for the
 current lead slug. Before deploy, the skill best-effort deletes retired
 hash-named legacy projects for the same slug.
 
-A deployability guard (replacing the retired `site.config.ts` fixture check)
-requires the clone dir to hold either a `package.json` with a `build` script or
-a bare `index.html`; otherwise it exits `decision-needed`.
-
 ## When to use
 
-- `demo-gen` heartbeat — after `lovable-build` exports the app.
+- `demo-gen` heartbeat, step 4 — after `template-fill`.
 
 ## When NOT to use
 
@@ -66,10 +60,7 @@ a bare `index.html`; otherwise it exits `decision-needed`.
 - 429 / build-minute exhaustion → exit `external-quota-exceeded`. demo-gen
   escalates Tier 1.
 - Build errors (TypeScript, missing deps) → exit `adapter-broken` with the
-  log tail attached. CTO investigates the Lovable export / prompt.
-- clone-path is not a deployable static/Vite app → exit `decision-needed`
-  (deployability guard). Usually means `lovable-build` did not export a valid
-  project.
+  log tail attached. CTO investigates the Web OS repo.
 
 ## Prerequisites
 
