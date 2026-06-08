@@ -3,8 +3,6 @@
 //
 // Invocation:
 //   node skills/lead-update/run.mjs --lead-id <uuid> [--stage demo_built] [--demo-url https://...] [--score 78]
-//   node skills/lead-update/run.mjs --lead-id <uuid> --review-posted   # stamp review_posted_at = now
-//   node skills/lead-update/run.mjs --lead-id <uuid> --board-approved  # stamp board_approved_at = now
 
 import { parseArgs } from "node:util";
 
@@ -22,14 +20,7 @@ try {
 }
 
 const ALLOWED_STAGES = new Set([
-  "new", "demo_built", "outreach_sent", "replied", "qualifying",
-  "closed_no_interest", "closed_unsubscribed", "booked", "won", "lost",
-]);
-
-// reply_status values written by classify-outreach-reply (build #2).
-const ALLOWED_REPLY_STATUS = new Set([
-  "positive", "negative", "changes", "ambiguous", "unsubscribed",
-  "bounced", "soft_bounce", "complaint", "auto_reply",
+  "new", "demo_built", "outreach_sent", "replied", "booked", "won", "lost",
 ]);
 
 function openDb() {
@@ -44,10 +35,6 @@ async function main() {
       stage: { type: "string" },
       "demo-url": { type: "string" },
       score: { type: "string" },
-      "review-posted": { type: "boolean" },
-      "board-approved": { type: "boolean" },
-      "reply-status": { type: "string" },
-      replied: { type: "boolean" },
     },
   });
 
@@ -97,36 +84,6 @@ async function main() {
     fieldsSet.push("score");
   }
 
-  if (values["review-posted"]) {
-    sets.push("review_posted_at = datetime('now')");
-    fieldsSet.push("review_posted_at");
-  }
-
-  if (values["board-approved"]) {
-    sets.push("board_approved_at = datetime('now')");
-    fieldsSet.push("board_approved_at");
-  }
-
-  if (values["reply-status"]) {
-    if (!ALLOWED_REPLY_STATUS.has(values["reply-status"])) {
-      console.error(JSON.stringify({
-        error: "decision-needed",
-        reason: "invalid reply-status",
-        got: values["reply-status"],
-        allowed: [...ALLOWED_REPLY_STATUS],
-      }));
-      process.exit(2);
-    }
-    sets.push("reply_status = ?");
-    params.push(values["reply-status"]);
-    fieldsSet.push("reply_status");
-  }
-
-  if (values.replied) {
-    sets.push("replied_at = datetime('now')");
-    fieldsSet.push("replied_at");
-  }
-
   if (sets.length === 0) {
     console.error(JSON.stringify({ error: "decision-needed", reason: "no update fields provided" }));
     process.exit(2);
@@ -134,7 +91,7 @@ async function main() {
 
   // Terminal-stage guard: refuse to downgrade a shipped lead back to demo_built.
   // Protects against cross-day re-runs re-processing outreach_sent leads (VAN-394).
-  const TERMINAL_STAGES = new Set(["outreach_sent", "outreach_failed", "replied", "qualifying", "closed_no_interest", "closed_unsubscribed", "booked", "won", "lost"]);
+  const TERMINAL_STAGES = new Set(["outreach_sent", "outreach_failed", "replied", "booked", "won", "lost"]);
   if (values.stage === "demo_built" || values.stage === "new") {
     const db = openDb();
     const currentRow = db.prepare("SELECT stage FROM leads WHERE id = ?").get(leadId);
