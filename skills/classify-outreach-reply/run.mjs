@@ -1,212 +1,228 @@
 #!/usr/bin/env node
-// classify-outreach-reply — classify an inbound message on an outreach thread and,
-// for the reputation-critical classes, AUTO-SUPPRESS as a fail-safe.
-//
-// Two layers:
-//   1. Deterministic detectors (authoritative — they OVERRIDE any human/LLM label):
-//        hard_bounce · soft_bounce · complaint · auto_reply · unsubscribe
-//      These are machine-readable (DSN/ARF headers, opt-out keywords). When one of
-//      {hard_bounce, complaint, unsubscribe} fires, this skill writes the suppression
-//      row ITSELF (unless --dry-run) so a missed agent step can never leak a resend.
-//   2. Human-reply label: if no detector fires, the message is a real human reply and
-//      needs semantic judgment the SDR (Sami) supplies via --llm-class
-//      (yes|no|changes|ambiguous). 'no' is a FULL STOP per spec decision #2 → it also
-//      auto-suppresses (reason=no_interest). Missing/invalid label → 'ambiguous' (safe
-//      default → routes to the Board).
-//
-// This skill does NOT change the lead's stage or send anything — it returns a decision
-// (reply_status, recommended_stage, send_auto_reply, alert_board, route) for the SDR to
-// execute via lead-update / gmail-send / board-approval-create. The only side effect it
-// owns is the suppression write (the one thing too risky to leave to agent memory).
-//
-// Invocation:
-//   node run.mjs --from <a@b> --subject "..." --body "..." \
-//     [--body-file p] [--raw-file p] [--lead-id id] [--lead-email a@b] \
-//     [--message-id id] [--llm-class yes|no|changes|ambiguous] [--dry-run]
-//
-// Exit: 0 ok · 2 decision-needed (bad input) · 3 adapter-broken (no node:sqlite)
 
-import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 
-let DatabaseSync;
-try {
-  ({ DatabaseSync } = await import("node:sqlite"));
-} catch (e) {
-  console.error(JSON.stringify({ error: "adapter-broken", reason: "node_sqlite_unavailable",
-    detail: "Bind NODE_OPTIONS=--experimental-sqlite.", message: e.message }));
-  process.exit(3);
-}
+const VALID = new Set(["positive", "negative", "unsubscribe", "ambiguous"]);
 
-function normEmail(s) { return String(s || "").trim().toLowerCase().replace(/^<|>$/g, ""); }
-function domainOf(email) { const m = normEmail(email).match(/@(.+)$/); return m ? m[1] : ""; }
-function firstEmailIn(s) { const m = String(s || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); return m ? normEmail(m[0]) : ""; }
-
-// Inline suppression upsert — kept identical to suppression-add/run.mjs (self-contained,
-// no cross-skill deploy dependency; keep these in sync).
-function upsertSuppression(db, { value, scope, reason, leadId, messageId, notes }) {
-  const v = scope === "domain" ? String(value).trim().toLowerCase() : normEmail(value);
-  if (!v) return { created: false, value: v, scope, skipped: "empty value" };
-  const existing = db.prepare("SELECT id FROM suppressions WHERE value=? AND scope=?").get(v, scope);
-  if (existing) {
-    db.prepare("UPDATE suppressions SET updated_at=datetime('now') WHERE id=?").run(existing.id);
-    return { created: false, id: existing.id, value: v, scope };
+class ClassifierError extends Error {
+  constructor(code, message, detail = {}) {
+    super(message);
+    this.name = "ClassifierError";
+    this.code = code;
+    this.detail = detail;
   }
-  const r = db.prepare(
-    `INSERT INTO suppressions (value, scope, reason, lead_id, source_message_id, notes)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(v, scope, reason, leadId || null, messageId || null, notes || null);
-  return { created: true, id: r.lastInsertRowid, value: v, scope };
 }
 
-// ── Detectors ────────────────────────────────────────────────────────────────
-// Each returns { class, signals } or null. Order = authority (machine first).
-
-const BOUNCE_PERMANENT = /(user unknown|no such (user|mailbox|recipient)|mailbox (unavailable|not found|does not exist|is disabled)|address (rejected|not found|does not exist)|recipient (address )?rejected|does not exist|account (is )?(disabled|inactive|closed|discontinued)|user (is )?(unknown|disabled)|relay access denied|domain not found|no such (domain|host)|552|550[\s-]|554[\s-]|delivery has permanently failed)/i;
-const BOUNCE_TRANSIENT = /(temporar(il)?y|over quota|quota exceeded|mailbox full|try again later|greylist|deferred|connection timed out|451[\s-]|452[\s-]|421[\s-]|4\.\d\.\d)/i;
-
-function detectBounce(from, subject, hay, raw) {
-  const sig = [];
-  const fromBounce = /(mailer-?daemon|postmaster|mail-?delivery|mdaemon)@/i.test(from);
-  if (fromBounce) sig.push(`from:${from}`);
-  const subjBounce = /(undeliverable|delivery (status notification|has failed|failure)|failure notice|returned mail|mail delivery (failed|subsystem)|message (not delivered|could not be delivered)|delivery incomplete|delivery error)/i.test(subject);
-  if (subjBounce) sig.push("subject:delivery-failure");
-  const dsn = /(content-type:\s*(message\/delivery-status|multipart\/report)[^]*report-type=delivery-status|^(final|original)-recipient:|^diagnostic-code:|^action:\s*failed|^status:\s*[245]\.\d+\.\d+)/im.test(raw + "\n" + hay);
-  if (dsn) sig.push("dsn-headers");
-  if (!fromBounce && !subjBounce && !dsn) return null;
-
-  // Capture an SMTP/DSN status class to decide hard vs soft.
-  const statusMatch = (raw + "\n" + hay).match(/^status:\s*([245])\.\d+\.\d+/im) || (raw + "\n" + hay).match(/\b([245])\d\d[\s-]\d\.\d\.\d\b/);
-  const cls = statusMatch ? statusMatch[1] : null;
-  const permanent = cls === "5" || BOUNCE_PERMANENT.test(hay) || BOUNCE_PERMANENT.test(raw);
-  const transient = cls === "4" || (BOUNCE_TRANSIENT.test(hay) && !permanent);
-  if (cls) sig.push(`status-class:${cls}xx`);
-  if (permanent && !transient) { sig.push("permanent-failure"); return { class: "hard_bounce", signals: sig }; }
-  if (transient) { sig.push("transient-failure"); return { class: "soft_bounce", signals: sig }; }
-  // Bounce detected but permanence unclear → treat as SOFT (do NOT auto-suppress a maybe-good lead).
-  sig.push("permanence-unknown→soft");
-  return { class: "soft_bounce", signals: sig };
+function fail(code, message, detail = {}, exitCode = 2) {
+  console.error(JSON.stringify({ error: code, message, ...detail }));
+  process.exit(exitCode);
 }
 
-function detectComplaint(from, subject, hay, raw) {
-  const sig = [];
-  if (/report-type=feedback-report/i.test(raw) || /content-type:\s*message\/feedback-report/i.test(raw)) sig.push("arf-feedback-report");
-  if (/(abuse|complaints?|feedback-loop|fbl)@/i.test(from)) sig.push(`from:${from}`);
-  if (/(spam (complaint|report)|abuse (report|complaint)|reported as spam|this is a spam)/i.test(subject + " " + hay)) sig.push("subject/body:spam-complaint");
-  return sig.length ? { class: "complaint", signals: sig } : null;
-}
-
-function detectAutoReply(subject, hay, raw) {
-  const sig = [];
-  if (/^(auto-submitted:\s*auto-(replied|generated)|x-auto(reply|respond|-response-suppress)|precedence:\s*(auto_reply|bulk|junk))/im.test(raw)) sig.push("auto-header");
-  if (/(out of (the )?office|auto[\s-]?reply|automatic reply|on vacation|away from (my )?(desk|office|email)|currently (away|unavailable|out)|will be (out|away|back)|maternity leave|on (holiday|leave|pto)|reduced hours)/i.test(subject + " " + hay)) sig.push("ooo-phrasing");
-  return sig.length ? { class: "auto_reply", signals: sig } : null;
-}
-
-function detectUnsubscribe(subject, body) {
-  const t = String(body || "").trim().toLowerCase();
-  if (/^(stop|stop\.|unsubscribe|remove me|opt[\s-]?out|no thanks?,? stop)$/.test(t)) return { class: "unsubscribe", signals: ["body==opt-out"] };
-  if (/\b(unsubscribe|opt[\s-]?out|remove me from|take me off (your|the)|stop emailing|stop contacting|stop sending|do not (contact|email|message) me( again)?|don'?t (contact|email) me|leave me alone|no longer (wish|want) to (receive|be contacted)|get me off (your|this) list)\b/i.test(subject + " " + body)) {
-    return { class: "unsubscribe", signals: ["opt-out-phrase"] };
+function readInput() {
+  const raw = readFileSync(0, "utf8");
+  let input;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    throw new ClassifierError("decision-needed", "invalid_json_input");
   }
-  return null;
-}
+  const from = String(input.from || "").trim();
+  const subject = String(input.subject || "").trim();
+  const body_text = String(input.body_text || "");
+  const original_outreach_body = typeof input.original_outreach_body === "string" ? input.original_outreach_body : "";
 
-// ── Decision mapping ─────────────────────────────────────────────────────────
-const DECISION = {
-  hard_bounce: { reply_status: "bounced",   suppress: "hard_bounce", stage: "lost",                alert: false, route: "Hard bounce — address suppressed; mark lead lost. Do NOT resend." },
-  soft_bounce: { reply_status: "soft_bounce", suppress: null,         stage: null,                  alert: false, route: "Transient bounce — NOT suppressed. Leave lead as-is; cadence may retry later." },
-  complaint:   { reply_status: "complaint", suppress: "complaint",   stage: "lost",                alert: true,  route: "SPAM COMPLAINT — address suppressed immediately. High-priority Discord reputation alert to Ryan." },
-  unsubscribe: { reply_status: "unsubscribed", suppress: "unsubscribe", stage: "closed_unsubscribed", alert: false, route: "Unsubscribe — address suppressed; lead closed_unsubscribed. No reply sent." },
-  auto_reply:  { reply_status: "auto_reply", suppress: null,         stage: null,                  alert: false, route: "Auto-reply / out-of-office — not a real reply. No state change; leave any drip running." },
-  positive:    { reply_status: "positive",  suppress: null,          stage: "qualifying",          alert: true,  route: "YES — send PATH 1 auto-reply (gated until warm-up), alert Ryan, lead → qualifying.", auto_reply: true },
-  negative:    { reply_status: "negative",  suppress: "no_interest", stage: "closed_no_interest",  alert: false, route: "NO — full stop (decision #2). Address suppressed; lead closed_no_interest. No soft-no email." },
-  changes:     { reply_status: "changes",   suppress: null,          stage: "qualifying",          alert: true,  route: "YES-BUT-WANTS-CHANGES — own lane. Capture edits, alert Ryan, rebuild/redeploy via Lovable on his OK. Do NOT bury in ambiguous." },
-  ambiguous:   { reply_status: "ambiguous", suppress: null,          stage: "replied",             alert: true,  route: "AMBIGUOUS — file a Tier-1 Board approval Issue with the message body, classifier evidence, and 3 candidate drafts. Board decides." },
-};
-
-async function main() {
-  const { values } = parseArgs({ options: {
-    from: { type: "string" }, subject: { type: "string" }, body: { type: "string" },
-    "body-file": { type: "string" }, "raw-file": { type: "string" },
-    "lead-id": { type: "string" }, "lead-email": { type: "string" }, "message-id": { type: "string" },
-    "llm-class": { type: "string" }, "dry-run": { type: "boolean" },
-  } });
-
-  const from = normEmail(values.from);
-  const subject = values.subject || "";
-  let body = values.body || "";
-  if (values["body-file"]) { try { body = readFileSync(values["body-file"], "utf8"); } catch { /* keep arg */ } }
-  let raw = "";
-  if (values["raw-file"]) { try { raw = readFileSync(values["raw-file"], "utf8"); } catch { /* optional */ } }
-  const hay = `${subject}\n${body}`;
-
-  if (!from && !subject && !body) {
-    console.error(JSON.stringify({ error: "decision-needed", reason: "need at least --from/--subject/--body" }));
-    process.exit(2);
+  if (!from || !subject || !body_text.trim()) {
+    throw new ClassifierError("decision-needed", "missing_required_fields", {
+      required: ["from", "subject", "body_text"],
+    });
   }
 
-  // Run detectors in authority order.
-  const det = detectBounce(from, subject, hay, raw)
-           || detectComplaint(from, subject, hay, raw)
-           || detectAutoReply(subject, hay, raw)
-           || detectUnsubscribe(subject, body);
+  return { from, subject, body_text, original_outreach_body };
+}
 
-  let klass, signals, source;
-  if (det) { klass = det.class; signals = det.signals; source = "detector"; }
-  else {
-    // Human reply — use the SDR's semantic label.
-    const raw_label = (values["llm-class"] || "").trim().toLowerCase();
-    const map = { yes: "positive", positive: "positive", no: "negative", negative: "negative",
-                  changes: "changes", "yes-but": "changes", ambiguous: "ambiguous", "": "ambiguous" };
-    klass = map[raw_label] || "ambiguous";
-    signals = raw_label && map[raw_label] ? [`llm-class:${raw_label}`] : ["llm-class:absent→ambiguous"];
-    source = "llm-label";
-  }
+function buildPrompt(input) {
+  const system = [
+    "You are an outbound-sales email reply classifier.",
+    "Classify the inbound reply into exactly one label: positive, negative, unsubscribe, ambiguous.",
+    "Return ONLY strict JSON with keys: classification, confidence, evidence, suggested_response.",
+    "confidence is a number between 0 and 1.",
+    "evidence must be an exact verbatim substring from body_text that drove the classification.",
+    "Use suggested_response only for ambiguous replies; otherwise omit or set null.",
+    "No markdown, no prose, no code fences.",
+  ].join(" ");
 
-  const d = DECISION[klass];
-  // The address we must never email again = the lead's address we contacted.
-  // Bounces name the failed recipient in the DSN; otherwise the reply comes FROM the lead.
-  const failedRecip = klass.endsWith("bounce")
-    ? (firstEmailIn((raw.match(/^(final|original)-recipient:.*$/im) || [""])[0]) ||
-       firstEmailIn((raw.match(/^x-failed-recipients:.*$/im) || [""])[0]))
-    : "";
-  const target = normEmail(values["lead-email"]) || failedRecip || from;
+  return [
+    system,
+    "",
+    `from: ${input.from}`,
+    `subject: ${input.subject}`,
+    "",
+    "original_outreach_body:",
+    input.original_outreach_body || "(not provided)",
+    "",
+    "body_text:",
+    input.body_text,
+  ].join("\n");
+}
 
-  let suppressed = null;
-  if (d.suppress && !values["dry-run"]) {
-    if (!target || !/@/.test(target)) {
-      suppressed = { created: false, skipped: "no target email to suppress" };
-    } else {
-      const db = new DatabaseSync(process.env.LEADS_DB_PATH || "/home/paperclip/vantyx-leads.sqlite");
-      suppressed = upsertSuppression(db, {
-        value: target, scope: "email", reason: d.suppress,
-        leadId: values["lead-id"], messageId: values["message-id"],
-        notes: `auto via classify-outreach-reply (${klass})`,
-      });
-      db.close();
+function parseClaudeStreamJson(stdout) {
+  let finalResult = null;
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    try {
+      const evt = JSON.parse(line);
+      if (evt && evt.type === "result") finalResult = evt;
+    } catch {
+      // ignore non-JSON lines
     }
   }
-
-  console.log(JSON.stringify({
-    class: klass,
-    source,
-    confidence: source === "detector" ? "high" : (signals[0].includes("absent") ? "low" : "medium"),
-    reply_status: d.reply_status,
-    recommended_stage: d.stage,
-    suppress: d.suppress || null,
-    suppressed,                      // null if nothing written, else {created,...}
-    send_auto_reply: !!d.auto_reply, // PATH 1 only; caller keeps gated until warm-up
-    alert_board: d.alert,
-    route: d.route,
-    signals,
-    suppress_target: d.suppress ? target : null,
-    lead_id: values["lead-id"] || null,
-    message_id: values["message-id"] || null,
-    dry_run: !!values["dry-run"],
-  }));
+  return finalResult;
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("run.mjs")) {
-  main().catch((e) => { console.error(JSON.stringify({ error: "unknown-failure", message: e.message })); process.exit(1); });
+function safeJsonParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
+
+function callClaude(prompt) {
+  const cmd = process.env.CLASSIFY_OUTREACH_REPLY_CLAUDE_CMD || "claude";
+  const model = process.env.CLASSIFY_OUTREACH_REPLY_CLAUDE_MODEL || "";
+  const timeoutMs = Number(process.env.CLASSIFY_OUTREACH_REPLY_TIMEOUT_MS || "90000");
+
+  const args = ["--print", "-", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"];
+  if (model) args.push("--model", model);
+
+  const proc = spawnSync(cmd, args, {
+    input: prompt,
+    encoding: "utf8",
+    timeout: timeoutMs,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+
+  if (proc.error) {
+    throw new ClassifierError("adapter-broken", "claude_invocation_failed", { detail: proc.error.message });
+  }
+  if (proc.status !== 0) {
+    throw new ClassifierError("adapter-broken", "claude_nonzero_exit", {
+      exit_code: proc.status,
+      stderr: (proc.stderr || "").trim().slice(0, 1200),
+    });
+  }
+
+  const streamResult = parseClaudeStreamJson(proc.stdout || "");
+  const text = streamResult?.result || (proc.stdout || "").trim();
+  return text;
+}
+
+function normalizeParsed(parsed, bodyText) {
+  if (!parsed || typeof parsed !== "object") {
+    throw new ClassifierError("parse-failure", "model_output_not_json_object");
+  }
+
+  const classification = String(parsed.classification || "").trim();
+  const confidence = Number(parsed.confidence);
+  const evidence = String(parsed.evidence || "");
+  const suggested = typeof parsed.suggested_response === "string" ? parsed.suggested_response.trim() : "";
+
+  if (!VALID.has(classification)) {
+    throw new ClassifierError("parse-failure", "invalid_classification", { got: classification });
+  }
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    throw new ClassifierError("parse-failure", "invalid_confidence", { got: parsed.confidence });
+  }
+  if (!evidence || !bodyText.includes(evidence)) {
+    throw new ClassifierError("parse-failure", "invalid_evidence_not_verbatim_substring", {
+      evidence,
+    });
+  }
+
+  let outClassification = classification;
+  let outEvidence = evidence;
+
+  if (confidence < 0.9) {
+    outClassification = "ambiguous";
+    outEvidence = `${evidence} | Confidence floor override: ${confidence.toFixed(2)} < 0.90, forced ambiguous.`;
+  }
+
+  const out = {
+    classification: outClassification,
+    confidence,
+    evidence: outEvidence,
+  };
+
+  if (outClassification === "ambiguous" && suggested) {
+    out.suggested_response = suggested;
+  }
+
+  return out;
+}
+
+function classifyStub(input) {
+  const body = input.body_text;
+  const t = body.toLowerCase();
+  const pick = (re) => {
+    const m = body.match(re);
+    return m ? m[0] : body.split(/\s+/).slice(0, 6).join(" ");
+  };
+
+  if (/\b(stop|unsubscribe|remove me|opt out|do not contact)\b/.test(t)) {
+    return { classification: "unsubscribe", confidence: 0.99, evidence: pick(/\b(stop|unsubscribe|remove me|opt out|do not contact)\b/i) };
+  }
+  if (/\b(not interested|no thanks|pass|don't contact)\b/.test(t)) {
+    return { classification: "negative", confidence: 0.97, evidence: pick(/\b(not interested|no thanks|pass|don't contact)\b/i) };
+  }
+  if (/\b(yes|sounds good|send photos|let'?s do it|interested)\b/.test(t) && !/\bprice|cost|how much|question\b/.test(t)) {
+    return { classification: "positive", confidence: 0.96, evidence: pick(/\b(yes|sounds good|send photos|let'?s do it|interested)\b/i) };
+  }
+  if (/\b(half in|maybe|possibly|could work)\b/.test(t)) {
+    return {
+      classification: "positive",
+      confidence: 0.88,
+      evidence: pick(/\b(half in|maybe|possibly|could work)\b/i),
+      suggested_response: "Happy to help. Want me to send one quick concept and pricing range?",
+    };
+  }
+
+  return {
+    classification: "ambiguous",
+    confidence: 0.91,
+    evidence: input.body_text.split(/\s+/).slice(0, 6).join(" "),
+    suggested_response: "Thanks for the reply. Could you confirm if you'd like a quick concept demo or want pricing details first?",
+  };
+}
+
+async function main() {
+  const input = readInput();
+  const stub = process.env.CLASSIFY_OUTREACH_REPLY_STUB === "1";
+
+  let rawModelOutput;
+  if (stub) {
+    rawModelOutput = JSON.stringify(classifyStub(input));
+  } else {
+    const prompt = buildPrompt(input);
+    rawModelOutput = callClaude(prompt);
+  }
+
+  const parsed = safeJsonParse(rawModelOutput);
+  if (!parsed) {
+    throw new ClassifierError("parse-failure", "model_output_not_valid_json", {
+      raw_output_excerpt: rawModelOutput.slice(0, 800),
+    });
+  }
+
+  const out = normalizeParsed(parsed, input.body_text);
+  process.stdout.write(`${JSON.stringify(out)}\n`);
+}
+
+main().catch((err) => {
+  if (err instanceof ClassifierError) {
+    const codeToExit = err.code === "parse-failure" ? 4 : err.code === "adapter-broken" ? 5 : 2;
+    fail(err.code, err.message, err.detail, codeToExit);
+  }
+  fail("unknown-failure", err?.message || String(err), {}, 1);
+});
